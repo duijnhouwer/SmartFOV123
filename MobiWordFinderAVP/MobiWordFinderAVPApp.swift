@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct MobiWordFinderAVPApp: App {
     private let launcherWindowID = "LauncherWindow"
-    @State private var appModel = EyeTestAppModel()
+    @State private var appModel = AppModel()
 
     var body: some Scene {
         WindowGroup(id: launcherWindowID) {
@@ -12,7 +12,7 @@ struct MobiWordFinderAVPApp: App {
         }
 
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
-            EyeTestCompositorLayer(appModel: appModel)
+            StimulusCompositorLayer(appModel: appModel)
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
     }

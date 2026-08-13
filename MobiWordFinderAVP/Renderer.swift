@@ -14,7 +14,7 @@ private extension LayerRenderer.Clock.Instant {
 
 private final class RenderTaskExecutor: TaskExecutor {
     static let shared = RenderTaskExecutor()
-    private let queue = DispatchQueue(label: "EyeTestRenderThread", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "MobiWordFinderAVPRenderThread", qos: .userInteractive)
 
     func enqueue(_ job: UnownedJob) {
         queue.async {
@@ -35,7 +35,7 @@ private struct SquareUniforms {
     var padding: Float = 0
 }
 
-private enum EyeTestRendererError: LocalizedError {
+private enum RendererError: LocalizedError {
     case commandQueueCreationFailed
     case shaderLibraryMissing
     case shaderFunctionMissing(String)
@@ -67,7 +67,7 @@ private enum EyeTestRendererError: LocalizedError {
     }
 }
 
-actor EyeTestRenderer {
+actor Renderer {
     private static let maxFramesInFlight = 3
 
     private enum Phase: Int {
@@ -82,14 +82,14 @@ actor EyeTestRenderer {
     }
 
     private let layerRenderer: LayerRenderer
-    private let appModel: EyeTestAppModel
+    private let appModel: AppModel
     private let arSession = ARKitSession()
     private let worldTracking = WorldTrackingProvider()
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private let cycleStart = CACurrentMediaTime()
-    private var lastPublishedState: EyeTestAppModel.ImmersiveSpaceState?
+    private var lastPublishedState: AppModel.ImmersiveSpaceState?
     private var isWaitingForTracking = false
     #if !targetEnvironment(simulator)
     private let residencySets: [MTLResidencySet]
@@ -99,24 +99,24 @@ actor EyeTestRenderer {
     private var nextSignalValue: UInt64 = 1
     #endif
 
-    init(_ layerRenderer: LayerRenderer, appModel: EyeTestAppModel) throws {
+    init(_ layerRenderer: LayerRenderer, appModel: AppModel) throws {
         self.layerRenderer = layerRenderer
         self.appModel = appModel
 
         let device = layerRenderer.device
         guard let commandQueue = device.makeCommandQueue() else {
-            throw EyeTestRendererError.commandQueueCreationFailed
+            throw RendererError.commandQueueCreationFailed
         }
         self.commandQueue = commandQueue
 
         guard let library = device.makeDefaultLibrary() else {
-            throw EyeTestRendererError.shaderLibraryMissing
+            throw RendererError.shaderLibraryMissing
         }
-        guard let vertexFunction = library.makeFunction(name: "eyeTestVertex") else {
-            throw EyeTestRendererError.shaderFunctionMissing("eyeTestVertex")
+        guard let vertexFunction = library.makeFunction(name: "stimulusVertex") else {
+            throw RendererError.shaderFunctionMissing("stimulusVertex")
         }
-        guard let fragmentFunction = library.makeFunction(name: "eyeTestFragment") else {
-            throw EyeTestRendererError.shaderFunctionMissing("eyeTestFragment")
+        guard let fragmentFunction = library.makeFunction(name: "stimulusFragment") else {
+            throw RendererError.shaderFunctionMissing("stimulusFragment")
         }
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
@@ -129,14 +129,14 @@ actor EyeTestRenderer {
         do {
             self.pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
         } catch {
-            throw EyeTestRendererError.pipelineCreationFailed(error)
+            throw RendererError.pipelineCreationFailed(error)
         }
 
         let depthDescriptor = MTLDepthStencilDescriptor()
         depthDescriptor.depthCompareFunction = .greater
         depthDescriptor.isDepthWriteEnabled = true
         guard let depthState = device.makeDepthStencilState(descriptor: depthDescriptor) else {
-            throw EyeTestRendererError.depthStateCreationFailed
+            throw RendererError.depthStateCreationFailed
         }
         self.depthState = depthState
 
@@ -149,11 +149,11 @@ actor EyeTestRenderer {
                 return try device.makeResidencySet(descriptor: descriptor)
             }
         } catch {
-            throw EyeTestRendererError.residencySetCreationFailed(error)
+            throw RendererError.residencySetCreationFailed(error)
         }
 
         guard let endFrameEvent = device.makeSharedEvent() else {
-            throw EyeTestRendererError.residencySetCreationFailed(
+            throw RendererError.residencySetCreationFailed(
                 NSError(
                     domain: "MobiWordFinderAVP",
                     code: 1,
@@ -166,10 +166,10 @@ actor EyeTestRenderer {
     }
 
     @MainActor
-    static func start(_ layerRenderer: LayerRenderer, appModel: EyeTestAppModel) {
+    static func start(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         Task(executorPreference: RenderTaskExecutor.shared) {
             do {
-                let renderer = try EyeTestRenderer(layerRenderer, appModel: appModel)
+                let renderer = try Renderer(layerRenderer, appModel: appModel)
                 try await renderer.startARSession()
                 await renderer.renderLoop()
             } catch {
@@ -188,7 +188,7 @@ actor EyeTestRenderer {
         do {
             try await arSession.run([worldTracking])
         } catch {
-            throw EyeTestRendererError.arSessionFailed(error)
+            throw RendererError.arSessionFailed(error)
         }
 
         // ARKitSession.run can return while a provider is still transitioning
@@ -203,7 +203,7 @@ actor EyeTestRenderer {
             }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        throw EyeTestRendererError.worldTrackingDidNotStart(worldTracking.state.description)
+        throw RendererError.worldTrackingDidNotStart(worldTracking.state.description)
     }
 
     private func renderLoop() {
@@ -226,7 +226,7 @@ actor EyeTestRenderer {
         }
     }
 
-    private func publishState(_ state: EyeTestAppModel.ImmersiveSpaceState) {
+    private func publishState(_ state: AppModel.ImmersiveSpaceState) {
         guard lastPublishedState != state else { return }
         lastPublishedState = state
         Task { @MainActor in

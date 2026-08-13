@@ -2,12 +2,12 @@ import CompositorServices
 import Metal
 import SwiftUI
 
-struct EyeTestCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfiguration {
-    let appModel: EyeTestAppModel
+struct StimulusCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfiguration {
+    let appModel: AppModel
 
     var body: some ImmersiveSpaceContent {
         CompositorLayer(configuration: self) { @MainActor layerRenderer in
-            EyeTestRenderer.start(layerRenderer, appModel: appModel)
+            Renderer.start(layerRenderer, appModel: appModel)
         }
     }
 

@@ -13,7 +13,7 @@ struct VertexOut {
     float4 position [[position]];
 };
 
-vertex VertexOut eyeTestVertex(
+vertex VertexOut stimulusVertex(
     uint vertexID [[vertex_id]],
     constant SquareUniforms &uniforms [[buffer(0)]])
 {
@@ -33,7 +33,7 @@ vertex VertexOut eyeTestVertex(
     return out;
 }
 
-fragment float4 eyeTestFragment(
+fragment float4 stimulusFragment(
     VertexOut in [[stage_in]],
     constant SquareUniforms &uniforms [[buffer(0)]])
 {

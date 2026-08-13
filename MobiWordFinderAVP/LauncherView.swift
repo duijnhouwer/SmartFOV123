@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct LauncherView: View {
-    @Environment(EyeTestAppModel.self) private var appModel
+    @Environment(AppModel.self) private var appModel
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @State private var safetyStopTask: Task<Void, Never>?

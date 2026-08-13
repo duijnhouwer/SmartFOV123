@@ -2,14 +2,14 @@ import SwiftUI
 
 @MainActor
 @Observable
-final class EyeTestAppModel {
+final class AppModel {
     enum ImmersiveSpaceState: Equatable {
         case closed
         case inTransition
         case open
     }
 
-    let immersiveSpaceID = "EyeTestSpace"
+    let immersiveSpaceID = "MobiWordFinderSpace"
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
 }
