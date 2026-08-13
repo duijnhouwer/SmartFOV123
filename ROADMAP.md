@@ -42,6 +42,15 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - Preserve an automatic timeout during development.
 - Surface renderer and tracking failures in the launcher instead of crashing or presenting an empty immersive scene.
 
+### Configuration and provenance
+
+- Keep the initial experiment definition in one bundled `experiment.json` file.
+- Bundle referenced panoramas and synthetic-environment assets in the Xcode project.
+- Rebuilding and reinstalling the development app is an acceptable way to deploy configuration and asset changes.
+- Treat `experiment.json` as the authoritative description of stimulus geometry, environment, and trials.
+- Save the exact experiment configuration and Git commit identifier with every result set.
+- Do not rely on the current repository state alone to reconstruct a completed session.
+
 ## Phase 1 — Stabilize the rendering diagnostic
 
 - [x] Configure a valid app bundle and device signing workflow.
@@ -68,7 +77,11 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 
 ## Phase 2 — Configurable stimuli
 
-- [ ] Replace hardcoded stimulus parameters with a validated configuration model.
+- [ ] Add a bundled `experiment.json` resource to the Xcode project.
+- [ ] Define a small, versioned JSON schema for the initial experiment format.
+- [ ] Replace hardcoded stimulus parameters with a validated configuration model loaded from `experiment.json`.
+- [ ] Display a human-readable configuration summary before starting a session.
+- [ ] Reject invalid or unsupported configurations with actionable errors rather than silently substituting defaults.
 - [ ] Configure horizontal and vertical position in visual-angle units.
 - [ ] Configure vergence distance independently from visual-field position.
 - [ ] Configure angular size rather than only physical size in metres.
@@ -78,6 +91,17 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Add fixation marks and optional binocular alignment references.
 - [ ] Add preview and configuration validation before entering immersion.
 - [ ] Save and load named stimulus protocols.
+
+### Initial `experiment.json` scope
+
+- Stimulus width and height in degrees of visual angle.
+- Horizontal and vertical position in degrees relative to straight ahead.
+- Vergence distance in metres.
+- Per-eye appearance and visibility.
+- Environment type: passthrough, bundled panorama, stereoscopic panorama, or bundled synthetic scene.
+- Bundled environment asset filename or scene identifier.
+- Trial definitions, event timing, repetition, and ordering.
+- A schema-version field so later app versions can migrate or reject old configurations explicitly.
 
 ### Open stimulus questions
 
@@ -130,8 +154,48 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Add explicit emergency stop and session recovery behavior.
 - [ ] Record stimulus events using a monotonic clock.
 - [ ] Record participant responses and response latency.
+- [ ] Write one uniquely named session directory per run in the app's Documents container.
+- [ ] Save tabular trial results as `results.csv`.
+- [ ] Copy the exact loaded `experiment.json` into the session directory.
+- [ ] Save `metadata.json` with the Git commit, app version, build number, device model, visionOS version, UTC timestamps, environment identifier, and session status.
 - [ ] Export structured session data with app, protocol, device, and environment versions.
 - [ ] Define handling for interrupted, incomplete, or invalid trials.
+
+### Proposed session output
+
+```text
+session-20260813T132500Z-P017/
+├── results.csv
+├── experiment.json
+└── metadata.json
+```
+
+Use a unique UTC timestamp and a non-identifying participant code in the directory name. Never overwrite an existing session. Record both requested event timing and measured presentation timing where available.
+
+### Development result transfer
+
+- [ ] Add a Mac shell script that finds the connected Apple Vision Pro and pulls session directories with `xcrun devicectl`.
+- [ ] Read from the app's private `Documents` directory using the `appDataContainer` domain and the app bundle identifier.
+- [ ] Pull every unarchived session rather than depending on one fixed result filename.
+- [ ] Refuse to overwrite an existing local result directory.
+- [ ] Verify transfer completion before reporting success.
+- [ ] Keep device-side results unless the user explicitly requests deletion or archival.
+- [ ] Document that results should be pulled before deleting or reinstalling the development app because its private container may be removed.
+- [ ] Add a visionOS Files/share-sheet export as a backup when command-line transfer is unavailable.
+- [ ] Consider a Mac companion app only after the shell-script workflow becomes limiting.
+
+Conceptual development command:
+
+```sh
+xcrun devicectl device copy from \
+  --device "<connected Vision Pro>" \
+  --domain-type appDataContainer \
+  --domain-identifier "<app bundle identifier>" \
+  --source "Documents/<session directory>" \
+  --destination "<Mac results directory>"
+```
+
+Scripts should consume `devicectl`'s JSON output rather than parsing its human-readable terminal output.
 
 ## Phase 5 — Calibration and validation
 
@@ -161,6 +225,9 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Replace remaining hardcoded diagnostic values with named constants before adding settings.
 - [ ] Add structured logging with rate limiting for renderer failures.
 - [ ] Add a small hardware test checklist to the repository.
+- [ ] Embed the Git commit identifier during the Xcode build without requiring runtime access to Git.
+- [ ] Mark builds produced from a dirty working tree so exported provenance is not misleading.
+- [ ] Add JSON schema and example configuration validation to automated tests.
 - [ ] Keep verified milestones in Git with informative commits and tags.
 
 ## Near-term priorities
@@ -168,8 +235,9 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 1. Confirm anatomical eye assignment beyond subjective color observation.
 2. Make repeated start/stop operation boringly reliable.
 3. Measure timing on hardware.
-4. Define the first real stimulus configuration schema.
-5. Prototype a neutral app-owned surround before selecting photographic assets.
+4. Define the first bundled `experiment.json` schema.
+5. Define session output and implement `results.csv`, saved configuration, and provenance metadata.
+6. Prototype a neutral app-owned surround before selecting photographic assets.
 
 ## Non-goals for the current prototype
 
