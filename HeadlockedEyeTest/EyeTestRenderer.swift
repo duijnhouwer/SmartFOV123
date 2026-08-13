@@ -1,6 +1,15 @@
+import ARKit
 import CompositorServices
 import Metal
 import QuartzCore
+
+private extension LayerRenderer.Clock.Instant {
+    var timeInterval: TimeInterval {
+        let components = Self.epoch.duration(to: self).components
+        return TimeInterval(components.seconds)
+            + TimeInterval(components.attoseconds) / 1_000_000_000_000_000_000
+    }
+}
 
 private final class RenderTaskExecutor: TaskExecutor {
     static let shared = RenderTaskExecutor()
@@ -33,6 +42,8 @@ private enum EyeTestRendererError: LocalizedError {
     case pipelineCreationFailed(Error)
     case depthStateCreationFailed
     case residencySetCreationFailed(Error)
+    case arSessionFailed(Error)
+    case worldTrackingDidNotStart(String)
 
     var errorDescription: String? {
         switch self {
@@ -48,6 +59,10 @@ private enum EyeTestRendererError: LocalizedError {
             return "Metal couldn't create the depth state."
         case .residencySetCreationFailed(let error):
             return "Metal couldn't make drawable textures resident: \(error.localizedDescription)"
+        case .arSessionFailed(let error):
+            return "ARKit couldn't start device tracking: \(error.localizedDescription)"
+        case .worldTrackingDidNotStart(let state):
+            return "ARKit device tracking did not start (provider state: \(state))."
         }
     }
 }
@@ -68,11 +83,14 @@ actor EyeTestRenderer {
 
     private let layerRenderer: LayerRenderer
     private let appModel: EyeTestAppModel
+    private let arSession = ARKitSession()
+    private let worldTracking = WorldTrackingProvider()
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private let cycleStart = CACurrentMediaTime()
     private var lastPublishedState: EyeTestAppModel.ImmersiveSpaceState?
+    private var isWaitingForTracking = false
     #if !targetEnvironment(simulator)
     private let residencySets: [MTLResidencySet]
     private let endFrameEvent: MTLSharedEvent
@@ -152,6 +170,7 @@ actor EyeTestRenderer {
         Task(executorPreference: RenderTaskExecutor.shared) {
             do {
                 let renderer = try EyeTestRenderer(layerRenderer, appModel: appModel)
+                try await renderer.startARSession()
                 await renderer.renderLoop()
             } catch {
                 await MainActor.run {
@@ -163,6 +182,28 @@ actor EyeTestRenderer {
                 }
             }
         }
+    }
+
+    private func startARSession() async throws {
+        do {
+            try await arSession.run([worldTracking])
+        } catch {
+            throw EyeTestRendererError.arSessionFailed(error)
+        }
+
+        // ARKitSession.run can return while a provider is still transitioning
+        // from initialized to running. Querying during that interval is a
+        // client error on physical visionOS.
+        for _ in 0..<200 {
+            if worldTracking.state == .running {
+                return
+            }
+            if worldTracking.state == .stopped {
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw EyeTestRendererError.worldTrackingDidNotStart(worldTracking.state.description)
     }
 
     private func renderLoop() {
@@ -223,6 +264,17 @@ actor EyeTestRenderer {
         guard let timing = frame.predictTiming() else { return }
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
 
+        // Validate tracking before acquiring drawables. Once drawables are
+        // acquired and submission starts, each one must be presented.
+        guard worldTracking.state == .running,
+              let deviceAnchor = worldTracking.queryDeviceAnchor(
+                atTimestamp: timing.presentationTime.timeInterval
+              ) else {
+            publishTrackingWaitIfNeeded()
+            return
+        }
+        clearTrackingWaitIfNeeded()
+
         let drawables: [LayerRenderer.Drawable]
         if #available(visionOS 26.0, *) {
             drawables = frame.queryDrawables()
@@ -232,8 +284,13 @@ actor EyeTestRenderer {
             drawables = []
         }
 
-        guard !drawables.isEmpty,
-              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        guard !drawables.isEmpty else { return }
+
+        for drawable in drawables {
+            drawable.deviceAnchor = deviceAnchor
+        }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
 
         commandBuffer.label = "Eye-test frame"
 
@@ -274,10 +331,6 @@ actor EyeTestRenderer {
     }
 
     private func render(_ drawable: LayerRenderer.Drawable, into commandBuffer: MTLCommandBuffer) {
-        // A nil anchor disables compositor reprojection. Because the square is
-        // authored directly in clip space, this intentionally makes it head-locked.
-        drawable.deviceAnchor = nil
-
         let phaseIndex = Int(CACurrentMediaTime() - cycleStart) % 3
         let phase = Phase(rawValue: phaseIndex) ?? .both
 
@@ -326,6 +379,21 @@ actor EyeTestRenderer {
             }
 
             encoder.endEncoding()
+        }
+
+    }
+
+    private func publishTrackingWaitIfNeeded() {
+        guard !isWaitingForTracking else { return }
+        isWaitingForTracking = true
+        publishError("Waiting for headset tracking before presenting the test.")
+    }
+
+    private func clearTrackingWaitIfNeeded() {
+        guard isWaitingForTracking else { return }
+        isWaitingForTracking = false
+        Task { @MainActor in
+            appModel.statusMessage = nil
         }
     }
 
