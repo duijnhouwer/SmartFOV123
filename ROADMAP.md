@@ -82,6 +82,10 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Replace hardcoded stimulus parameters with a validated configuration model loaded from `experiment.json`.
 - [ ] Display a human-readable configuration summary before starting a session.
 - [ ] Reject invalid or unsupported configurations with actionable errors rather than silently substituting defaults.
+- [ ] Decode and validate the complete experiment, including every trial, when the app launches; do not defer trial-specific decoding or validation until a session is underway.
+- [ ] Prevent a session from starting unless all trials pass validation, so a configuration problem cannot terminate an experiment after valid trials have already been completed.
+- [ ] Report all discoverable configuration problems together, with the JSON field path, supplied value, expected type or allowed values, and affected trial number where applicable.
+- [ ] Show configuration errors in the launcher and mirror their full details to the Xcode console while keeping the app responsive.
 - [ ] Configure horizontal and vertical position in visual-angle units.
 - [ ] Configure vergence distance independently from visual-field position.
 - [ ] Configure angular size rather than only physical size in metres.
