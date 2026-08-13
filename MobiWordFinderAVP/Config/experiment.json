@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "stimulus": {
+    "targetWord": "COW",
+    "randomSeed": 123,
+
+    "letterHeightArcmin": 20,
+    "letterFontName": "Arial",
+    "letterRGB": [0.0, 0.0, 0.0],
+
+    "letterBoxWidthArcmin": 30,
+    "letterBoxHeightArcmin": 30,
+    "letterBoxStrokeArcmin": 5,
+    "letterBoxFillRGB": [1.0, 1.0, 1.0],
+    "letterBoxStrokeRGB": [0.0, 0.0, 0.0],
+
+    "numberOfLetterBoxesHorizontal": 10,
+    "numberOfLetterBoxesVertical": 10,
+
+    "letterGridHorizontalDeltaDegrees": 0.0,
+    "letterGridVerticalDeltaDegrees": 0.0,
+
+    "fovWidthDegrees": 21.21,
+    "fovHeightDegrees": 21.21,
+    "fovHorizontalOffsetDegrees": 0.0,
+    "fovVerticalOffsetDegrees": 0.0,
+    "fovBackgroundRGB": [1.0, 1.0, 1.0],
+    "fovBorderStrokeArcmin": 5,
+    "fovBorderRGB": [0.0, 0.0, 0.0],
+
+    "distanceMeters": 1.5
+  }
+}

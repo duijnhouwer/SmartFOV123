@@ -87,6 +87,9 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Configure angular size rather than only physical size in metres.
 - [ ] Configure shape, color, luminance, contrast, and opacity per eye.
 - [ ] Support images, text, and WordFinder-specific content.
+- [ ] Generate each WordFinder letter grid reproducibly from its configured random seed.
+- [ ] Validate the completed grid horizontally and vertically to ensure the target word occurs only at its intentionally selected position and orientation; if an accidental occurrence exists, deterministically generate a new grid and check again.
+- [ ] Add automated tests for accidental target-word detection, including overlapping occurrences and occurrences that share letters with the intended target.
 - [ ] Configure independent onset, offset, duration, and repetition per eye.
 - [ ] Add fixation marks and optional binocular alignment references.
 - [ ] Add preview and configuration validation before entering immersion.
