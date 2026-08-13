@@ -212,6 +212,7 @@ actor Renderer {
         self.commandQueue = commandQueue
         self.glyphAtlas = try GlyphAtlas(
             device: device,
+            commandQueue: commandQueue,
             fontName: experiment.configuration.stimulus.letterFontName
         )
 

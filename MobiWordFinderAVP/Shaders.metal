@@ -60,19 +60,10 @@ float4 primitiveColor(
             coord::normalized,
             address::clamp_to_edge,
             mag_filter::linear,
-            min_filter::linear
+            min_filter::linear,
+            mip_filter::linear
         );
-        float signedDistance = glyphAtlas.sample(glyphSampler, in.uv).r - 0.5;
-        // Preserve the SDF's zero contour (and therefore the requested glyph
-        // dimensions), but use a narrower-than-one-pixel coverage transition.
-        // This raises edge acutance without the halos a sharpening convolution
-        // would introduce around the dark letters.
-        constexpr float glyphEdgeSoftnessPixels = 0.65;
-        float screenSpaceWidth = max(
-            fwidth(signedDistance) * glyphEdgeSoftnessPixels,
-            1.0 / 255.0
-        );
-        float glyphAlpha = clamp(signedDistance / screenSpaceWidth + 0.5, 0.0, 1.0);
+        float glyphAlpha = glyphAtlas.sample(glyphSampler, in.uv).r;
         if (glyphAlpha < 0.001) {
             discard_fragment();
         }
