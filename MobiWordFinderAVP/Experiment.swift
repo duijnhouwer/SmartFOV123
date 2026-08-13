@@ -25,7 +25,31 @@ struct RGB: Decodable, Sendable {
 
 struct ExperimentConfiguration: Decodable, Sendable {
     let schemaVersion: Int
+    let display: DisplayConfiguration
     let stimulus: StimulusConfiguration
+}
+
+enum DisplayMode: String, Decodable, CaseIterable, Sendable {
+    case videoPassthrough
+    case opticalSeeThroughSimulation
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        guard let mode = Self(rawValue: value) else {
+            let allowedValues = Self.allCases.map(\.rawValue).joined(separator: ", ")
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid value ‘\(value)’; expected one of: \(allowedValues)."
+            )
+        }
+        self = mode
+    }
+}
+
+struct DisplayConfiguration: Decodable, Sendable {
+    let mode: DisplayMode
+    let peakOpacity: Float
 }
 
 enum StimulusEye: String, Decodable, Sendable {
@@ -113,6 +137,8 @@ struct Experiment: Sendable {
         let configuration: ExperimentConfiguration
         do {
             configuration = try JSONDecoder().decode(ExperimentConfiguration.self, from: data)
+        } catch let error as DecodingError {
+            throw ExperimentError.invalidConfiguration(describe(error))
         } catch {
             throw ExperimentError.invalidConfiguration(error.localizedDescription)
         }
@@ -122,6 +148,31 @@ struct Experiment: Sendable {
             configuration: configuration,
             grid: try WordGridGenerator.makeGrid(using: configuration.stimulus)
         )
+    }
+
+    private static func describe(_ error: DecodingError) -> String {
+        let context: DecodingError.Context
+        let path: [CodingKey]
+        switch error {
+        case .typeMismatch(_, let errorContext),
+             .valueNotFound(_, let errorContext),
+             .dataCorrupted(let errorContext):
+            context = errorContext
+            path = errorContext.codingPath
+        case .keyNotFound(let key, let errorContext):
+            context = errorContext
+            path = errorContext.codingPath + [key]
+        @unknown default:
+            return error.localizedDescription
+        }
+
+        let jsonPath = path.reduce("$") { result, key in
+            if let index = key.intValue {
+                return "\(result)[\(index)]"
+            }
+            return "\(result).\(key.stringValue)"
+        }
+        return "\(jsonPath): \(context.debugDescription)"
     }
 }
 
@@ -150,6 +201,13 @@ private extension ExperimentConfiguration {
         guard schemaVersion == 1 else {
             throw ExperimentError.invalidConfiguration(
                 "schemaVersion \(schemaVersion) is unsupported; this app requires version 1."
+            )
+        }
+
+        guard display.peakOpacity.isFinite,
+              (0...1).contains(display.peakOpacity) else {
+            throw ExperimentError.invalidConfiguration(
+                "display.peakOpacity must be a finite value between 0.0 and 1.0."
             )
         }
 

@@ -13,12 +13,6 @@ private extension LayerRenderer.Clock.Instant {
     }
 }
 
-private extension RGB {
-    var simd: SIMD4<Float> {
-        SIMD4(red, green, blue, 1)
-    }
-}
-
 private final class RenderTaskExecutor: TaskExecutor {
     static let shared = RenderTaskExecutor()
     private let queue = DispatchQueue(label: "MobiWordFinderAVPRenderThread", qos: .userInteractive)
@@ -34,29 +28,22 @@ private final class RenderTaskExecutor: TaskExecutor {
     }
 }
 
-private struct PrimitiveUniforms {
+private struct StimulusUniforms {
     var clipFromDevice: simd_float4x4
-    var fillColor: SIMD4<Float>
-    var strokeColor: SIMD4<Float>
     var centerMeters: SIMD2<Float>
     var halfSizeMeters: SIMD2<Float>
-    var strokeMeters: SIMD2<Float>
-    var uvOrigin: SIMD2<Float>
-    var uvSize: SIMD2<Float>
+    var fovCenterMeters: SIMD2<Float>
+    var fovHalfSizeMeters: SIMD2<Float>
     var distanceMeters: Float
-    var mode: UInt32
     var trackingAreaRenderValue: UInt32
-    var edgeAntialiasMask: UInt32
 }
 
 private struct StimulusGeometry {
     let distanceMeters: Float
     let fovCenterMeters: SIMD2<Float>
     let fovHalfSizeMeters: SIMD2<Float>
-    let fovStrokeMeters: SIMD2<Float>
     let gridCenterMeters: SIMD2<Float>
     let boxSizeMeters: SIMD2<Float>
-    let boxStrokeMeters: SIMD2<Float>
     let letterHeightMeters: Float
 
     init(configuration: StimulusConfiguration) {
@@ -81,12 +68,6 @@ private struct StimulusGeometry {
                 distance: configuration.distanceMeters
             ) / 2
         )
-        let fovStroke = Self.sizeMeters(
-            degrees: configuration.fovBorderStrokeArcmin / 60,
-            distance: configuration.distanceMeters
-        )
-        fovStrokeMeters = SIMD2(repeating: fovStroke)
-
         gridCenterMeters = fovCenterMeters + SIMD2(
             Self.offsetMeters(
                 degrees: configuration.letterGridHorizontalDeltaDegrees,
@@ -107,11 +88,6 @@ private struct StimulusGeometry {
                 distance: configuration.distanceMeters
             )
         )
-        let boxStroke = Self.sizeMeters(
-            degrees: configuration.letterBoxStrokeArcmin / 60,
-            distance: configuration.distanceMeters
-        )
-        boxStrokeMeters = SIMD2(repeating: boxStroke)
         letterHeightMeters = Self.sizeMeters(
             degrees: configuration.letterHeightArcmin / 60,
             distance: configuration.distanceMeters
@@ -184,7 +160,7 @@ actor Renderer {
     private let visualPipelineState: MTLRenderPipelineState
     private let trackingPipelineState: MTLRenderPipelineState?
     private let depthState: MTLDepthStencilState
-    private let glyphAtlas: GlyphAtlas
+    private let stimulusTexture: StimulusTexture
     private var loggedProjectionEyes = Set<String>()
     private var lastPublishedState: AppModel.ImmersiveSpaceState?
     private var isWaitingForTracking = false
@@ -210,10 +186,10 @@ actor Renderer {
             throw RendererError.commandQueueCreationFailed
         }
         self.commandQueue = commandQueue
-        self.glyphAtlas = try GlyphAtlas(
+        self.stimulusTexture = try StimulusTexture(
             device: device,
             commandQueue: commandQueue,
-            fontName: experiment.configuration.stimulus.letterFontName
+            experiment: experiment
         )
 
         guard let library = device.makeDefaultLibrary() else {
@@ -237,11 +213,11 @@ actor Renderer {
             descriptor.vertexFunction = vertexFunction
             descriptor.fragmentFunction = fragmentFunction
             descriptor.colorAttachments[0].pixelFormat = layerRenderer.configuration.colorFormat
-            descriptor.colorAttachments[0].isBlendingEnabled = true
-            descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
-            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            // The fragment shader emits the completed stimulus pixel using
+            // visionOS's required premultiplied-alpha convention. Replacing
+            // prior pixels lets black in the optical-see-through simulation
+            // punch transparent holes through previously drawn surfaces.
+            descriptor.colorAttachments[0].isBlendingEnabled = false
             if #available(visionOS 26.0, *), includesTrackingArea {
                 descriptor.colorAttachments[1].pixelFormat = layerRenderer.configuration.trackingAreasFormat
             }
@@ -436,7 +412,7 @@ actor Renderer {
         commandBuffer.label = "WordFinder frame"
 
         #if !targetEnvironment(simulator)
-        residencySet.addAllocation(glyphAtlas.texture)
+        residencySet.addAllocation(stimulusTexture.texture)
         for drawable in drawables {
             for texture in drawable.colorTextures {
                 residencySet.addAllocation(texture)
@@ -527,7 +503,7 @@ actor Renderer {
                 usesTrackingPipeline ? trackingPipelineState! : visualPipelineState
             )
             encoder.setDepthStencilState(depthState)
-            encoder.setFragmentTexture(glyphAtlas.texture, index: 0)
+            encoder.setFragmentTexture(stimulusTexture.texture, index: 0)
 
             let clipFromDevice = drawable.computeProjection(viewIndex: viewIndex) * view.transform.inverse
             logProjectionMetricsIfNeeded(
@@ -631,22 +607,15 @@ actor Renderer {
         clipFromDevice: simd_float4x4,
         trackingValues: [UInt16]
     ) {
-        let config = experiment.configuration.stimulus
-        drawPrimitive(
+        drawTexturedQuad(
             encoder: encoder,
             clipFromDevice: clipFromDevice,
             center: geometry.fovCenterMeters,
             halfSize: geometry.fovHalfSizeMeters,
-            fillColor: config.fovBackgroundRGB.simd,
-            strokeColor: config.fovBorderRGB.simd,
-            strokeMeters: geometry.fovStrokeMeters,
-            mode: 0,
-            uvOrigin: .zero,
-            uvSize: .zero,
-            trackingValue: 0,
-            edgeAntialiasMask: 0b1111
+            trackingValue: 0
         )
 
+        guard trackingPipelineState != nil else { return }
         for index in experiment.grid.letters.indices {
             let row = index / experiment.grid.columns
             let column = index % experiment.grid.columns
@@ -658,96 +627,40 @@ actor Renderer {
             )
             let trackingValue = UInt32(trackingValues[index])
 
-            drawPrimitive(
+            drawTexturedQuad(
                 encoder: encoder,
                 clipFromDevice: clipFromDevice,
                 center: center,
                 halfSize: geometry.boxSizeMeters / 2,
-                fillColor: config.letterBoxFillRGB.simd,
-                strokeColor: config.letterBoxStrokeRGB.simd,
-                strokeMeters: geometry.boxStrokeMeters,
-                mode: 0,
-                uvOrigin: .zero,
-                uvSize: .zero,
-                trackingValue: trackingValue,
-                edgeAntialiasMask: edgeAntialiasMask(
-                    row: row,
-                    column: column,
-                    rows: experiment.grid.rows,
-                    columns: experiment.grid.columns
-                )
-            )
-
-            guard let glyph = glyphAtlas.glyphs[experiment.grid.letters[index]] else { continue }
-            let glyphQuadSize = geometry.letterHeightMeters
-                * glyphAtlas.quadScaleForConfiguredCapHeight
-            drawPrimitive(
-                encoder: encoder,
-                clipFromDevice: clipFromDevice,
-                center: center,
-                halfSize: SIMD2(repeating: glyphQuadSize / 2),
-                fillColor: config.letterRGB.simd,
-                strokeColor: .zero,
-                strokeMeters: .zero,
-                mode: 1,
-                uvOrigin: glyph.uvOrigin,
-                uvSize: glyph.uvSize,
-                trackingValue: trackingValue,
-                edgeAntialiasMask: 0
+                trackingValue: trackingValue
             )
         }
     }
 
-    private func edgeAntialiasMask(
-        row: Int,
-        column: Int,
-        rows: Int,
-        columns: Int
-    ) -> UInt32 {
-        var mask: UInt32 = 0
-        if column == 0 { mask |= 0b0001 }
-        if column == columns - 1 { mask |= 0b0010 }
-        if row == rows - 1 { mask |= 0b0100 }
-        if row == 0 { mask |= 0b1000 }
-        return mask
-    }
-
-    private func drawPrimitive(
+    private func drawTexturedQuad(
         encoder: MTLRenderCommandEncoder,
         clipFromDevice: simd_float4x4,
         center: SIMD2<Float>,
         halfSize: SIMD2<Float>,
-        fillColor: SIMD4<Float>,
-        strokeColor: SIMD4<Float>,
-        strokeMeters: SIMD2<Float>,
-        mode: UInt32,
-        uvOrigin: SIMD2<Float>,
-        uvSize: SIMD2<Float>,
-        trackingValue: UInt32,
-        edgeAntialiasMask: UInt32
+        trackingValue: UInt32
     ) {
-        var uniforms = PrimitiveUniforms(
+        var uniforms = StimulusUniforms(
             clipFromDevice: clipFromDevice,
-            fillColor: fillColor,
-            strokeColor: strokeColor,
             centerMeters: center,
             halfSizeMeters: halfSize,
-            strokeMeters: strokeMeters,
-            uvOrigin: uvOrigin,
-            uvSize: uvSize,
+            fovCenterMeters: geometry.fovCenterMeters,
+            fovHalfSizeMeters: geometry.fovHalfSizeMeters,
             distanceMeters: geometry.distanceMeters,
-            mode: mode,
-            trackingAreaRenderValue: trackingValue,
-            edgeAntialiasMask: edgeAntialiasMask
+            trackingAreaRenderValue: trackingValue
         )
         encoder.setVertexBytes(
             &uniforms,
-            length: MemoryLayout<PrimitiveUniforms>.stride,
+            length: MemoryLayout<StimulusUniforms>.stride,
             index: 0
         )
         encoder.setFragmentBytes(
             &uniforms,
-            length: MemoryLayout<PrimitiveUniforms>.stride,
+            length: MemoryLayout<StimulusUniforms>.stride,
             index: 0
         )
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)

@@ -1,43 +1,46 @@
 #include <metal_stdlib>
 using namespace metal;
 
-struct PrimitiveUniforms {
+struct StimulusUniforms {
     float4x4 clipFromDevice;
-    float4 fillColor;
-    float4 strokeColor;
     float2 centerMeters;
     float2 halfSizeMeters;
-    float2 strokeMeters;
-    float2 uvOrigin;
-    float2 uvSize;
+    float2 fovCenterMeters;
+    float2 fovHalfSizeMeters;
     float distanceMeters;
-    uint mode;
     uint trackingAreaRenderValue;
-    uint edgeAntialiasMask;
 };
 
 struct VertexOut {
     float4 position [[position]];
-    float2 localPosition;
     float2 uv;
+};
+
+struct VisualFragmentOut {
+    float4 color [[color(0)]];
+    float depth [[depth(any)]];
 };
 
 struct TrackingFragmentOut {
     float4 color [[color(0)]];
     uint16_t trackingAreaRenderValue [[color(1)]];
+    float depth [[depth(any)]];
 };
 
 vertex VertexOut stimulusVertex(
     uint vertexID [[vertex_id]],
-    constant PrimitiveUniforms &uniforms [[buffer(0)]])
+    constant StimulusUniforms &uniforms [[buffer(0)]])
 {
     constexpr float2 corners[6] = {
         float2(-1.0, -1.0), float2( 1.0, -1.0), float2(-1.0,  1.0),
         float2(-1.0,  1.0), float2( 1.0, -1.0), float2( 1.0,  1.0)
     };
 
-    float2 corner = corners[vertexID];
-    float2 deviceXY = uniforms.centerMeters + corner * uniforms.halfSizeMeters;
+    float2 deviceXY = uniforms.centerMeters
+        + corners[vertexID] * uniforms.halfSizeMeters;
+    float2 normalizedFOV = (
+        deviceXY - (uniforms.fovCenterMeters - uniforms.fovHalfSizeMeters)
+    ) / (2.0 * uniforms.fovHalfSizeMeters);
 
     VertexOut out;
     out.position = uniforms.clipFromDevice * float4(
@@ -45,80 +48,51 @@ vertex VertexOut stimulusVertex(
         -uniforms.distanceMeters,
         1.0
     );
-    out.localPosition = corner;
-    out.uv = uniforms.uvOrigin + ((corner + 1.0) * 0.5) * uniforms.uvSize;
+    // Quartz bitmap rows and Metal texture coordinates use opposite vertical
+    // conventions, so invert V while mapping the completed FOV texture.
+    out.uv = float2(normalizedFOV.x, 1.0 - normalizedFOV.y);
     return out;
 }
 
-float4 primitiveColor(
-    VertexOut in,
-    constant PrimitiveUniforms &uniforms,
-    texture2d<float> glyphAtlas)
+float4 sampleStimulus(VertexOut in, texture2d<float> stimulusTexture)
 {
-    if (uniforms.mode == 1) {
-        constexpr sampler glyphSampler(
-            coord::normalized,
-            address::clamp_to_edge,
-            mag_filter::linear,
-            min_filter::linear,
-            mip_filter::linear
-        );
-        float glyphAlpha = glyphAtlas.sample(glyphSampler, in.uv).r;
-        if (glyphAlpha < 0.001) {
-            discard_fragment();
-        }
-        return float4(uniforms.fillColor.rgb, uniforms.fillColor.a * glyphAlpha);
-    }
-
-    float2 distanceFromEdge = (1.0 - abs(in.localPosition)) * uniforms.halfSizeMeters;
-    float signedDistanceFromStroke = min(
-        distanceFromEdge.x - uniforms.strokeMeters.x,
-        distanceFromEdge.y - uniforms.strokeMeters.y
+    constexpr sampler stimulusSampler(
+        coord::normalized,
+        address::clamp_to_edge,
+        mag_filter::linear,
+        min_filter::linear,
+        mip_filter::linear
     );
-    float antialiasWidth = max(0.5 * fwidth(signedDistanceFromStroke), 1e-7);
-    float fillCoverage = smoothstep(
-        -antialiasWidth,
-        antialiasWidth,
-        signedDistanceFromStroke
-    );
-    float4 color = mix(uniforms.strokeColor, uniforms.fillColor, fillCoverage);
-
-    float leftDistance = (in.localPosition.x + 1.0) * uniforms.halfSizeMeters.x;
-    float rightDistance = (1.0 - in.localPosition.x) * uniforms.halfSizeMeters.x;
-    float bottomDistance = (in.localPosition.y + 1.0) * uniforms.halfSizeMeters.y;
-    float topDistance = (1.0 - in.localPosition.y) * uniforms.halfSizeMeters.y;
-    float outerCoverage = 1.0;
-    if ((uniforms.edgeAntialiasMask & 0x1u) != 0u) {
-        outerCoverage *= smoothstep(0.0, max(fwidth(leftDistance), 1e-7), leftDistance);
-    }
-    if ((uniforms.edgeAntialiasMask & 0x2u) != 0u) {
-        outerCoverage *= smoothstep(0.0, max(fwidth(rightDistance), 1e-7), rightDistance);
-    }
-    if ((uniforms.edgeAntialiasMask & 0x4u) != 0u) {
-        outerCoverage *= smoothstep(0.0, max(fwidth(bottomDistance), 1e-7), bottomDistance);
-    }
-    if ((uniforms.edgeAntialiasMask & 0x8u) != 0u) {
-        outerCoverage *= smoothstep(0.0, max(fwidth(topDistance), 1e-7), topDistance);
-    }
-    color.a *= outerCoverage;
-    return color;
+    return stimulusTexture.sample(stimulusSampler, in.uv);
 }
 
-fragment float4 stimulusFragment(
-    VertexOut in [[stage_in]],
-    constant PrimitiveUniforms &uniforms [[buffer(0)]],
-    texture2d<float> glyphAtlas [[texture(0)]])
+float compositorDepth(VertexOut in, float alpha)
 {
-    return primitiveColor(in, uniforms, glyphAtlas);
+    // Mixed Compositor Services content requires reverse-Z depth 0 wherever
+    // alpha is zero; otherwise transparent pixels can affect passthrough.
+    return alpha > 0.0001 ? in.position.z : 0.0;
+}
+
+fragment VisualFragmentOut stimulusFragment(
+    VertexOut in [[stage_in]],
+    texture2d<float> stimulusTexture [[texture(0)]])
+{
+    float4 color = sampleStimulus(in, stimulusTexture);
+    return VisualFragmentOut {
+        color,
+        compositorDepth(in, color.a)
+    };
 }
 
 fragment TrackingFragmentOut stimulusTrackingFragment(
     VertexOut in [[stage_in]],
-    constant PrimitiveUniforms &uniforms [[buffer(0)]],
-    texture2d<float> glyphAtlas [[texture(0)]])
+    constant StimulusUniforms &uniforms [[buffer(0)]],
+    texture2d<float> stimulusTexture [[texture(0)]])
 {
+    float4 color = sampleStimulus(in, stimulusTexture);
     return TrackingFragmentOut {
-        primitiveColor(in, uniforms, glyphAtlas),
-        uint16_t(uniforms.trackingAreaRenderValue)
+        color,
+        uint16_t(uniforms.trackingAreaRenderValue),
+        compositorDepth(in, color.a)
     };
 }

@@ -1,5 +1,9 @@
 {
   "schemaVersion": 1,
+  "display": {
+    "mode": "opticalSeeThroughSimulation",
+    "peakOpacity": 0.35
+  },
   "stimulus": {
     "eye": "right",
     "targetWord": "COW",

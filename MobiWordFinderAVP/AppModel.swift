@@ -20,6 +20,7 @@ final class AppModel {
         } catch {
             experiment = nil
             statusMessage = error.localizedDescription
+            print("MobiWordFinder configuration error: \(error.localizedDescription)")
         }
     }
 
