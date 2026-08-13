@@ -14,7 +14,7 @@ struct LauncherView: View {
             Text("1 s: left red + right green\n1 s: left red only\n1 s: right green only")
                 .multilineTextAlignment(.center)
 
-            Text("Keep this window open while testing. The test stops automatically after 30 seconds.")
+            Text("Both eyes target the same point 1.5 metres dead ahead. Keep this window open while testing; the test stops automatically after 30 seconds.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

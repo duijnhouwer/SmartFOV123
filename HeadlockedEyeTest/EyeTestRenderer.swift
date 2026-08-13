@@ -2,6 +2,7 @@ import ARKit
 import CompositorServices
 import Metal
 import QuartzCore
+import simd
 
 private extension LayerRenderer.Clock.Instant {
     var timeInterval: TimeInterval {
@@ -27,12 +28,11 @@ private final class RenderTaskExecutor: TaskExecutor {
 }
 
 private struct SquareUniforms {
-    var halfWidth: Float
-    var halfHeight: Float
-    var red: Float
-    var green: Float
-    var blue: Float
-    var alpha: Float
+    var clipFromDevice: simd_float4x4
+    var color: SIMD4<Float>
+    var halfSizeMeters: SIMD2<Float>
+    var distanceMeters: Float
+    var padding: Float = 0
 }
 
 private enum EyeTestRendererError: LocalizedError {
@@ -367,9 +367,12 @@ actor EyeTestRenderer {
             encoder.setViewport(textureMap.viewport)
 
             if let color = color(for: eye, phase: phase) {
-                let viewport = textureMap.viewport
-                let aspect = Float(viewport.width / viewport.height)
-                var uniforms = makeUniforms(color: color, aspect: aspect)
+                var uniforms = makeUniforms(
+                    color: color,
+                    drawable: drawable,
+                    view: view,
+                    viewIndex: viewIndex
+                )
 
                 encoder.setRenderPipelineState(pipelineState)
                 encoder.setDepthStencilState(depthState)
@@ -422,15 +425,23 @@ actor EyeTestRenderer {
         }
     }
 
-    private func makeUniforms(color: SIMD4<Float>, aspect: Float) -> SquareUniforms {
-        let halfHeight: Float = 0.12
+    private func makeUniforms(
+        color: SIMD4<Float>,
+        drawable: LayerRenderer.Drawable,
+        view: LayerRenderer.Drawable.View,
+        viewIndex: Int
+    ) -> SquareUniforms {
+        // Project one shared device-space plane into both calibrated eye
+        // frusta. This is a single binocular target 1.5 metres dead ahead,
+        // rather than two unrelated targets at each texture's midpoint.
+        let projection = drawable.computeProjection(viewIndex: viewIndex)
+        let deviceToView = view.transform.inverse
+
         return SquareUniforms(
-            halfWidth: halfHeight / max(aspect, 0.01),
-            halfHeight: halfHeight,
-            red: color.x,
-            green: color.y,
-            blue: color.z,
-            alpha: color.w
+            clipFromDevice: projection * deviceToView,
+            color: color,
+            halfSizeMeters: SIMD2(repeating: 0.12),
+            distanceMeters: 1.5
         )
     }
 }

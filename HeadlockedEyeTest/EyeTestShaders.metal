@@ -2,12 +2,11 @@
 using namespace metal;
 
 struct SquareUniforms {
-    float halfWidth;
-    float halfHeight;
-    float red;
-    float green;
-    float blue;
-    float alpha;
+    float4x4 clipFromDevice;
+    float4 color;
+    float2 halfSizeMeters;
+    float distanceMeters;
+    float padding;
 };
 
 struct VertexOut {
@@ -25,12 +24,12 @@ vertex VertexOut eyeTestVertex(
 
     float2 corner = corners[vertexID];
     VertexOut out;
-    out.position = float4(
-        corner.x * uniforms.halfWidth,
-        corner.y * uniforms.halfHeight,
-        0.5,
+    float4 devicePosition = float4(
+        corner * uniforms.halfSizeMeters,
+        -uniforms.distanceMeters,
         1.0
     );
+    out.position = uniforms.clipFromDevice * devicePosition;
     return out;
 }
 
@@ -38,5 +37,5 @@ fragment float4 eyeTestFragment(
     VertexOut in [[stage_in]],
     constant SquareUniforms &uniforms [[buffer(0)]])
 {
-    return float4(uniforms.red, uniforms.green, uniforms.blue, uniforms.alpha);
+    return uniforms.color;
 }

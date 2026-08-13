@@ -2,7 +2,7 @@
 
 A minimal visionOS hardware test for independent left- and right-eye rendering over passthrough.
 
-The centered, head-locked square repeats this three-second cycle:
+The renderer projects one shared head-locked square 1.5 metres dead ahead into each eye's calibrated view. The square repeats this three-second cycle:
 
 1. Left eye red and right eye green for one second.
 2. Left eye red and right eye transparent for one second.
