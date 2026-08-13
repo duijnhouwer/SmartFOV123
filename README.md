@@ -1,4 +1,4 @@
-# Headlocked Eye Test
+# MobiWordFinderAVP
 
 A minimal visionOS hardware test for independent left- and right-eye rendering over passthrough.
 
@@ -12,7 +12,7 @@ Use **Start test** in the launcher to open the mixed immersive space. The launch
 
 ## Run on Apple Vision Pro
 
-1. Open `HeadlockedEyeTest.xcodeproj` in Xcode.
+1. Open `MobiWordFinderAVP.xcodeproj` in Xcode.
 2. In **Signing & Capabilities**, select your Personal Team.
 3. Pair the headset, enable Developer Mode, and select it as the run destination.
 4. Build and run.

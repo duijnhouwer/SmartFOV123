@@ -155,7 +155,7 @@ actor EyeTestRenderer {
         guard let endFrameEvent = device.makeSharedEvent() else {
             throw EyeTestRendererError.residencySetCreationFailed(
                 NSError(
-                    domain: "HeadlockedEyeTest",
+                    domain: "MobiWordFinderAVP",
                     code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Metal couldn't create a frame synchronization event."]
                 )

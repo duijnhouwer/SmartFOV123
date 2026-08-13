@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct HeadlockedEyeTestApp: App {
+struct MobiWordFinderAVPApp: App {
     private let launcherWindowID = "LauncherWindow"
     @State private var appModel = EyeTestAppModel()
 

@@ -7,14 +7,14 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		A00000000000000000000009 /* HeadlockedEyeTest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HeadlockedEyeTest.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000009 /* MobiWordFinderAVP.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MobiWordFinderAVP.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		A00000000000000000000005 /* HeadlockedEyeTest */ = {
+		A00000000000000000000005 /* MobiWordFinderAVP */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = HeadlockedEyeTest;
+			path = MobiWordFinderAVP;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -33,7 +33,7 @@
 		A00000000000000000000003 = {
 			isa = PBXGroup;
 			children = (
-				A00000000000000000000005 /* HeadlockedEyeTest */,
+				A00000000000000000000005 /* MobiWordFinderAVP */,
 				A00000000000000000000016 /* Info.plist */,
 				A00000000000000000000004 /* Products */,
 			);
@@ -42,7 +42,7 @@
 		A00000000000000000000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A00000000000000000000009 /* HeadlockedEyeTest.app */,
+				A00000000000000000000009 /* MobiWordFinderAVP.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -50,9 +50,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A00000000000000000000002 /* HeadlockedEyeTest */ = {
+		A00000000000000000000002 /* MobiWordFinderAVP */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A00000000000000000000011 /* Build configuration list for PBXNativeTarget "HeadlockedEyeTest" */;
+			buildConfigurationList = A00000000000000000000011 /* Build configuration list for PBXNativeTarget "MobiWordFinderAVP" */;
 			buildPhases = (
 				A00000000000000000000006 /* Sources */,
 				A00000000000000000000007 /* Frameworks */,
@@ -63,13 +63,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				A00000000000000000000005 /* HeadlockedEyeTest */,
+				A00000000000000000000005 /* MobiWordFinderAVP */,
 			);
-			name = HeadlockedEyeTest;
+			name = MobiWordFinderAVP;
 			packageProductDependencies = (
 			);
-			productName = HeadlockedEyeTest;
-			productReference = A00000000000000000000009 /* HeadlockedEyeTest.app */;
+			productName = MobiWordFinderAVP;
+			productReference = A00000000000000000000009 /* MobiWordFinderAVP.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -87,7 +87,7 @@
 					};
 				};
 			};
-			buildConfigurationList = A00000000000000000000010 /* Build configuration list for PBXProject "HeadlockedEyeTest" */;
+			buildConfigurationList = A00000000000000000000010 /* Build configuration list for PBXProject "MobiWordFinderAVP" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -100,7 +100,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A00000000000000000000002 /* HeadlockedEyeTest */,
+				A00000000000000000000002 /* MobiWordFinderAVP */,
 			);
 		};
 /* End PBXProject section */
@@ -200,7 +200,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A00000000000000000000010 /* Build configuration list for PBXProject "HeadlockedEyeTest" */ = {
+		A00000000000000000000010 /* Build configuration list for PBXProject "MobiWordFinderAVP" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A00000000000000000000012 /* Debug */,
@@ -209,7 +209,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A00000000000000000000011 /* Build configuration list for PBXNativeTarget "HeadlockedEyeTest" */ = {
+		A00000000000000000000011 /* Build configuration list for PBXNativeTarget "MobiWordFinderAVP" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A00000000000000000000014 /* Debug */,

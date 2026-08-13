@@ -1,4 +1,4 @@
-# Mobi WordFinder for Apple Vision Pro — Roadmap
+# MobiWordFinderAVP — Roadmap
 
 ## Purpose
 
