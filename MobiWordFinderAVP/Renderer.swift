@@ -1,5 +1,6 @@
 import ARKit
 import CompositorServices
+import Foundation
 import Metal
 import QuartzCore
 import simd
@@ -9,6 +10,12 @@ private extension LayerRenderer.Clock.Instant {
         let components = Self.epoch.duration(to: self).components
         return TimeInterval(components.seconds)
             + TimeInterval(components.attoseconds) / 1_000_000_000_000_000_000
+    }
+}
+
+private extension RGB {
+    var simd: SIMD4<Float> {
+        SIMD4(red, green, blue, 1)
     }
 }
 
@@ -27,15 +34,110 @@ private final class RenderTaskExecutor: TaskExecutor {
     }
 }
 
-private struct SquareUniforms {
+private struct PrimitiveUniforms {
     var clipFromDevice: simd_float4x4
-    var color: SIMD4<Float>
+    var fillColor: SIMD4<Float>
+    var strokeColor: SIMD4<Float>
+    var centerMeters: SIMD2<Float>
     var halfSizeMeters: SIMD2<Float>
+    var strokeMeters: SIMD2<Float>
+    var uvOrigin: SIMD2<Float>
+    var uvSize: SIMD2<Float>
     var distanceMeters: Float
-    var padding: Float = 0
+    var mode: UInt32
+    var trackingAreaRenderValue: UInt32
+    var edgeAntialiasMask: UInt32
+}
+
+private struct StimulusGeometry {
+    let distanceMeters: Float
+    let fovCenterMeters: SIMD2<Float>
+    let fovHalfSizeMeters: SIMD2<Float>
+    let fovStrokeMeters: SIMD2<Float>
+    let gridCenterMeters: SIMD2<Float>
+    let boxSizeMeters: SIMD2<Float>
+    let boxStrokeMeters: SIMD2<Float>
+    let letterHeightMeters: Float
+
+    init(configuration: StimulusConfiguration) {
+        distanceMeters = configuration.distanceMeters
+        fovCenterMeters = SIMD2(
+            Self.offsetMeters(
+                degrees: configuration.fovHorizontalOffsetDegrees,
+                distance: configuration.distanceMeters
+            ),
+            Self.offsetMeters(
+                degrees: configuration.fovVerticalOffsetDegrees,
+                distance: configuration.distanceMeters
+            )
+        )
+        fovHalfSizeMeters = SIMD2(
+            Self.sizeMeters(
+                degrees: configuration.fovWidthDegrees,
+                distance: configuration.distanceMeters
+            ) / 2,
+            Self.sizeMeters(
+                degrees: configuration.fovHeightDegrees,
+                distance: configuration.distanceMeters
+            ) / 2
+        )
+        let fovStroke = Self.sizeMeters(
+            degrees: configuration.fovBorderStrokeArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+        fovStrokeMeters = SIMD2(repeating: fovStroke)
+
+        gridCenterMeters = fovCenterMeters + SIMD2(
+            Self.offsetMeters(
+                degrees: configuration.letterGridHorizontalDeltaDegrees,
+                distance: configuration.distanceMeters
+            ),
+            Self.offsetMeters(
+                degrees: configuration.letterGridVerticalDeltaDegrees,
+                distance: configuration.distanceMeters
+            )
+        )
+        boxSizeMeters = SIMD2(
+            Self.sizeMeters(
+                degrees: configuration.letterBoxWidthArcmin / 60,
+                distance: configuration.distanceMeters
+            ),
+            Self.sizeMeters(
+                degrees: configuration.letterBoxHeightArcmin / 60,
+                distance: configuration.distanceMeters
+            )
+        )
+        let boxStroke = Self.sizeMeters(
+            degrees: configuration.letterBoxStrokeArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+        boxStrokeMeters = SIMD2(repeating: boxStroke)
+        letterHeightMeters = Self.sizeMeters(
+            degrees: configuration.letterHeightArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+    }
+
+    func boxCenter(row: Int, column: Int, rows: Int, columns: Int) -> SIMD2<Float> {
+        let horizontalIndex = Float(column) - Float(columns - 1) / 2
+        let verticalIndex = Float(rows - 1) / 2 - Float(row)
+        return gridCenterMeters + SIMD2(
+            horizontalIndex * boxSizeMeters.x,
+            verticalIndex * boxSizeMeters.y
+        )
+    }
+
+    private static func sizeMeters(degrees: Float, distance: Float) -> Float {
+        2 * distance * tan(degrees * .pi / 360)
+    }
+
+    private static func offsetMeters(degrees: Float, distance: Float) -> Float {
+        distance * tan(degrees * .pi / 180)
+    }
 }
 
 private enum RendererError: LocalizedError {
+    case experimentMissing
     case commandQueueCreationFailed
     case shaderLibraryMissing
     case shaderFunctionMissing(String)
@@ -47,6 +149,8 @@ private enum RendererError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .experimentMissing:
+            return "No valid experiment is available to render."
         case .commandQueueCreationFailed:
             return "Metal couldn't create a command queue."
         case .shaderLibraryMissing:
@@ -70,25 +174,18 @@ private enum RendererError: LocalizedError {
 actor Renderer {
     private static let maxFramesInFlight = 3
 
-    private enum Phase: Int {
-        case both = 0
-        case leftOnly = 1
-        case rightOnly = 2
-    }
-
-    private enum Eye {
-        case left
-        case right
-    }
-
     private let layerRenderer: LayerRenderer
     private let appModel: AppModel
+    private let experiment: Experiment
+    private let geometry: StimulusGeometry
     private let arSession = ARKitSession()
     private let worldTracking = WorldTrackingProvider()
     private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLRenderPipelineState
+    private let visualPipelineState: MTLRenderPipelineState
+    private let trackingPipelineState: MTLRenderPipelineState?
     private let depthState: MTLDepthStencilState
-    private let cycleStart = CACurrentMediaTime()
+    private let glyphAtlas: GlyphAtlas
+    private var loggedProjectionEyes = Set<String>()
     private var lastPublishedState: AppModel.ImmersiveSpaceState?
     private var isWaitingForTracking = false
     #if !targetEnvironment(simulator)
@@ -100,14 +197,23 @@ actor Renderer {
     #endif
 
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) throws {
+        guard let experiment = appModel.experiment else {
+            throw RendererError.experimentMissing
+        }
         self.layerRenderer = layerRenderer
         self.appModel = appModel
+        self.experiment = experiment
+        self.geometry = StimulusGeometry(configuration: experiment.configuration.stimulus)
 
         let device = layerRenderer.device
         guard let commandQueue = device.makeCommandQueue() else {
             throw RendererError.commandQueueCreationFailed
         }
         self.commandQueue = commandQueue
+        self.glyphAtlas = try GlyphAtlas(
+            device: device,
+            fontName: experiment.configuration.stimulus.letterFontName
+        )
 
         guard let library = device.makeDefaultLibrary() else {
             throw RendererError.shaderLibraryMissing
@@ -115,25 +221,70 @@ actor Renderer {
         guard let vertexFunction = library.makeFunction(name: "stimulusVertex") else {
             throw RendererError.shaderFunctionMissing("stimulusVertex")
         }
-        guard let fragmentFunction = library.makeFunction(name: "stimulusFragment") else {
+        guard let visualFragmentFunction = library.makeFunction(name: "stimulusFragment") else {
             throw RendererError.shaderFunctionMissing("stimulusFragment")
         }
 
-        let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "Head-locked eye-test square"
-        pipelineDescriptor.vertexFunction = vertexFunction
-        pipelineDescriptor.fragmentFunction = fragmentFunction
-        pipelineDescriptor.colorAttachments[0].pixelFormat = layerRenderer.configuration.colorFormat
-        pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
+        func makePipelineDescriptor(
+            fragmentFunction: MTLFunction,
+            includesTrackingArea: Bool
+        ) -> MTLRenderPipelineDescriptor {
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.label = includesTrackingArea
+                ? "WordFinder visual and tracking-area pipeline"
+                : "WordFinder visual pipeline"
+            descriptor.vertexFunction = vertexFunction
+            descriptor.fragmentFunction = fragmentFunction
+            descriptor.colorAttachments[0].pixelFormat = layerRenderer.configuration.colorFormat
+            descriptor.colorAttachments[0].isBlendingEnabled = true
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            if #available(visionOS 26.0, *), includesTrackingArea {
+                descriptor.colorAttachments[1].pixelFormat = layerRenderer.configuration.trackingAreasFormat
+            }
+            descriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
+            return descriptor
+        }
 
         do {
-            self.pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            visualPipelineState = try device.makeRenderPipelineState(
+                descriptor: makePipelineDescriptor(
+                    fragmentFunction: visualFragmentFunction,
+                    includesTrackingArea: false
+                )
+            )
+
+            if #available(visionOS 26.0, *),
+               layerRenderer.configuration.trackingAreasFormat != .invalid {
+                guard let trackingFragmentFunction = library.makeFunction(
+                    name: "stimulusTrackingFragment"
+                ) else {
+                    throw RendererError.shaderFunctionMissing("stimulusTrackingFragment")
+                }
+                trackingPipelineState = try device.makeRenderPipelineState(
+                    descriptor: makePipelineDescriptor(
+                        fragmentFunction: trackingFragmentFunction,
+                        includesTrackingArea: true
+                    )
+                )
+            } else {
+                trackingPipelineState = nil
+            }
+        } catch let error as RendererError {
+            throw error
         } catch {
             throw RendererError.pipelineCreationFailed(error)
         }
 
         let depthDescriptor = MTLDepthStencilDescriptor()
-        depthDescriptor.depthCompareFunction = .greater
+        // Every WordFinder primitive lies on one stimulus plane. Comparing
+        // coplanar depths causes unstable z-fighting between the FOV, boxes,
+        // and glyphs. Always accept fragments so painter's order determines
+        // their appearance, while retaining depth writes because visionOS
+        // uses the depth surface with tracking areas for gaze interaction.
+        depthDescriptor.depthCompareFunction = .always
         depthDescriptor.isDepthWriteEnabled = true
         guard let depthState = device.makeDepthStencilState(descriptor: depthDescriptor) else {
             throw RendererError.depthStateCreationFailed
@@ -144,8 +295,8 @@ actor Renderer {
         do {
             self.residencySets = try (0..<Self.maxFramesInFlight).map { index in
                 let descriptor = MTLResidencySetDescriptor()
-                descriptor.label = "Eye-test frame \(index)"
-                descriptor.initialCapacity = 4
+                descriptor.label = "WordFinder frame \(index)"
+                descriptor.initialCapacity = 8
                 return try device.makeResidencySet(descriptor: descriptor)
             }
         } catch {
@@ -175,9 +326,6 @@ actor Renderer {
             } catch {
                 await MainActor.run {
                     appModel.statusMessage = error.localizedDescription
-                    // The immersive scene may already be open even though renderer
-                    // construction failed. Keep Stop available so the user can
-                    // always dismiss that scene.
                     appModel.immersiveSpaceState = .open
                 }
             }
@@ -191,9 +339,6 @@ actor Renderer {
             throw RendererError.arSessionFailed(error)
         }
 
-        // ARKitSession.run can return while a provider is still transitioning
-        // from initialized to running. Querying during that interval is a
-        // client error on physical visionOS.
         for _ in 0..<200 {
             if worldTracking.state == .running {
                 return
@@ -264,8 +409,6 @@ actor Renderer {
         guard let timing = frame.predictTiming() else { return }
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
 
-        // Validate tracking before acquiring drawables. Once drawables are
-        // acquired and submission starts, each one must be presented.
         guard worldTracking.state == .running,
               let deviceAnchor = worldTracking.queryDeviceAnchor(
                 atTimestamp: timing.presentationTime.timeInterval
@@ -283,24 +426,27 @@ actor Renderer {
         } else {
             drawables = []
         }
-
         guard !drawables.isEmpty else { return }
 
         for drawable in drawables {
             drawable.deviceAnchor = deviceAnchor
         }
-
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
-
-        commandBuffer.label = "Eye-test frame"
+        commandBuffer.label = "WordFinder frame"
 
         #if !targetEnvironment(simulator)
+        residencySet.addAllocation(glyphAtlas.texture)
         for drawable in drawables {
             for texture in drawable.colorTextures {
                 residencySet.addAllocation(texture)
             }
             for texture in drawable.depthTextures {
                 residencySet.addAllocation(texture)
+            }
+            if #available(visionOS 26.0, *) {
+                for texture in drawable.trackingAreasTextures {
+                    residencySet.addAllocation(texture)
+                }
             }
         }
         residencySet.commit()
@@ -331,8 +477,7 @@ actor Renderer {
     }
 
     private func render(_ drawable: LayerRenderer.Drawable, into commandBuffer: MTLCommandBuffer) {
-        let phaseIndex = Int(CACurrentMediaTime() - cycleStart) % 3
-        let phase = Phase(rawValue: phaseIndex) ?? .both
+        let trackingValues = makeTrackingAreas(for: drawable)
 
         for (viewIndex, view) in drawable.views.enumerated() {
             let textureMap = view.textureMap
@@ -357,39 +502,260 @@ actor Renderer {
             depthAttachment.storeAction = .store
             depthAttachment.clearDepth = 0
 
+            var usesTrackingPipeline = false
+            if #available(visionOS 26.0, *),
+               trackingPipelineState != nil,
+               textureMap.textureIndex < drawable.trackingAreasTextures.count {
+                let trackingAttachment = descriptor.colorAttachments[1]!
+                trackingAttachment.texture = drawable.trackingAreasTextures[textureMap.textureIndex]
+                trackingAttachment.slice = textureMap.sliceIndex
+                trackingAttachment.loadAction = .clear
+                trackingAttachment.storeAction = .store
+                trackingAttachment.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+                usesTrackingPipeline = true
+            }
+
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
                 publishError("Metal couldn't create a render encoder.")
                 continue
             }
 
-            let eye = eye(for: view, index: viewIndex, viewCount: drawable.views.count)
-            encoder.label = eye == .left ? "Left eye" : "Right eye"
+            encoder.label = viewIndex == 0 ? "WordFinder left view" : "WordFinder right view"
             encoder.setViewport(textureMap.viewport)
+            encoder.setRenderPipelineState(
+                usesTrackingPipeline ? trackingPipelineState! : visualPipelineState
+            )
+            encoder.setDepthStencilState(depthState)
+            encoder.setFragmentTexture(glyphAtlas.texture, index: 0)
 
-            if let color = color(for: eye, phase: phase) {
-                var uniforms = makeUniforms(
-                    color: color,
-                    drawable: drawable,
-                    view: view,
-                    viewIndex: viewIndex
+            let clipFromDevice = drawable.computeProjection(viewIndex: viewIndex) * view.transform.inverse
+            logProjectionMetricsIfNeeded(
+                viewIndex: viewIndex,
+                viewTransform: view.transform,
+                clipFromDevice: clipFromDevice,
+                viewport: textureMap.viewport
+            )
+            if shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform) {
+                drawStimulus(
+                    encoder: encoder,
+                    clipFromDevice: clipFromDevice,
+                    trackingValues: trackingValues
                 )
-
-                encoder.setRenderPipelineState(pipelineState)
-                encoder.setDepthStencilState(depthState)
-                encoder.setVertexBytes(&uniforms, length: MemoryLayout<SquareUniforms>.stride, index: 0)
-                encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SquareUniforms>.stride, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
             }
-
             encoder.endEncoding()
         }
+    }
 
+    private func shouldRenderStimulus(
+        viewIndex: Int,
+        viewTransform: simd_float4x4
+    ) -> Bool {
+        let configuredEye = experiment.configuration.stimulus.eye
+        guard configuredEye != .both else { return true }
+        return configuredEye == renderedEye(viewIndex: viewIndex, viewTransform: viewTransform)
+    }
+
+    private func renderedEye(
+        viewIndex: Int,
+        viewTransform: simd_float4x4
+    ) -> StimulusEye {
+        let eyeOffset = viewTransform.columns.3.x
+        if eyeOffset < -0.0001 {
+            return .left
+        }
+        if eyeOffset > 0.0001 {
+            return .right
+        }
+
+        // The physical headset supplies signed per-eye translations. Retain a
+        // deterministic fallback for simulator/runtime layouts without one.
+        return viewIndex == 0 ? .left : .right
+    }
+
+    private func logProjectionMetricsIfNeeded(
+        viewIndex: Int,
+        viewTransform: simd_float4x4,
+        clipFromDevice: simd_float4x4,
+        viewport: MTLViewport
+    ) {
+        let eyeLabel = renderedEye(
+            viewIndex: viewIndex,
+            viewTransform: viewTransform
+        ).rawValue
+        guard loggedProjectionEyes.insert(eyeLabel).inserted else { return }
+
+        let halfHeight = geometry.letterHeightMeters / 2
+        let bottom = clipFromDevice * SIMD4<Float>(
+            geometry.gridCenterMeters.x,
+            geometry.gridCenterMeters.y - halfHeight,
+            -geometry.distanceMeters,
+            1
+        )
+        let top = clipFromDevice * SIMD4<Float>(
+            geometry.gridCenterMeters.x,
+            geometry.gridCenterMeters.y + halfHeight,
+            -geometry.distanceMeters,
+            1
+        )
+        guard bottom.w != 0, top.w != 0 else { return }
+        let normalizedDeviceHeight = abs(top.y / top.w - bottom.y / bottom.w)
+        let projectedPixelHeight = Double(normalizedDeviceHeight) * viewport.height / 2
+        let configuredArcminutes = experiment.configuration.stimulus.letterHeightArcmin
+        print(
+            String(
+                format: "MobiWordFinder: %@ eye viewport %.0f x %.0f; %.1f arcmin letter cap height projects to %.2f pixels.",
+                eyeLabel,
+                viewport.width,
+                viewport.height,
+                configuredArcminutes,
+                projectedPixelHeight
+            )
+        )
+    }
+
+    private func makeTrackingAreas(for drawable: LayerRenderer.Drawable) -> [UInt16] {
+        guard #available(visionOS 26.0, *), trackingPipelineState != nil else {
+            return [UInt16](repeating: 0, count: experiment.grid.letters.count)
+        }
+
+        return experiment.grid.letters.indices.map { index in
+            let trackingArea = drawable.addTrackingArea(identifier: .init(UInt64(index + 1)))
+            trackingArea.addHoverEffect(.automatic)
+            return trackingArea.renderValue.rawValue
+        }
+    }
+
+    private func drawStimulus(
+        encoder: MTLRenderCommandEncoder,
+        clipFromDevice: simd_float4x4,
+        trackingValues: [UInt16]
+    ) {
+        let config = experiment.configuration.stimulus
+        drawPrimitive(
+            encoder: encoder,
+            clipFromDevice: clipFromDevice,
+            center: geometry.fovCenterMeters,
+            halfSize: geometry.fovHalfSizeMeters,
+            fillColor: config.fovBackgroundRGB.simd,
+            strokeColor: config.fovBorderRGB.simd,
+            strokeMeters: geometry.fovStrokeMeters,
+            mode: 0,
+            uvOrigin: .zero,
+            uvSize: .zero,
+            trackingValue: 0,
+            edgeAntialiasMask: 0b1111
+        )
+
+        for index in experiment.grid.letters.indices {
+            let row = index / experiment.grid.columns
+            let column = index % experiment.grid.columns
+            let center = geometry.boxCenter(
+                row: row,
+                column: column,
+                rows: experiment.grid.rows,
+                columns: experiment.grid.columns
+            )
+            let trackingValue = UInt32(trackingValues[index])
+
+            drawPrimitive(
+                encoder: encoder,
+                clipFromDevice: clipFromDevice,
+                center: center,
+                halfSize: geometry.boxSizeMeters / 2,
+                fillColor: config.letterBoxFillRGB.simd,
+                strokeColor: config.letterBoxStrokeRGB.simd,
+                strokeMeters: geometry.boxStrokeMeters,
+                mode: 0,
+                uvOrigin: .zero,
+                uvSize: .zero,
+                trackingValue: trackingValue,
+                edgeAntialiasMask: edgeAntialiasMask(
+                    row: row,
+                    column: column,
+                    rows: experiment.grid.rows,
+                    columns: experiment.grid.columns
+                )
+            )
+
+            guard let glyph = glyphAtlas.glyphs[experiment.grid.letters[index]] else { continue }
+            let glyphQuadSize = geometry.letterHeightMeters
+                * glyphAtlas.quadScaleForConfiguredCapHeight
+            drawPrimitive(
+                encoder: encoder,
+                clipFromDevice: clipFromDevice,
+                center: center,
+                halfSize: SIMD2(repeating: glyphQuadSize / 2),
+                fillColor: config.letterRGB.simd,
+                strokeColor: .zero,
+                strokeMeters: .zero,
+                mode: 1,
+                uvOrigin: glyph.uvOrigin,
+                uvSize: glyph.uvSize,
+                trackingValue: trackingValue,
+                edgeAntialiasMask: 0
+            )
+        }
+    }
+
+    private func edgeAntialiasMask(
+        row: Int,
+        column: Int,
+        rows: Int,
+        columns: Int
+    ) -> UInt32 {
+        var mask: UInt32 = 0
+        if column == 0 { mask |= 0b0001 }
+        if column == columns - 1 { mask |= 0b0010 }
+        if row == rows - 1 { mask |= 0b0100 }
+        if row == 0 { mask |= 0b1000 }
+        return mask
+    }
+
+    private func drawPrimitive(
+        encoder: MTLRenderCommandEncoder,
+        clipFromDevice: simd_float4x4,
+        center: SIMD2<Float>,
+        halfSize: SIMD2<Float>,
+        fillColor: SIMD4<Float>,
+        strokeColor: SIMD4<Float>,
+        strokeMeters: SIMD2<Float>,
+        mode: UInt32,
+        uvOrigin: SIMD2<Float>,
+        uvSize: SIMD2<Float>,
+        trackingValue: UInt32,
+        edgeAntialiasMask: UInt32
+    ) {
+        var uniforms = PrimitiveUniforms(
+            clipFromDevice: clipFromDevice,
+            fillColor: fillColor,
+            strokeColor: strokeColor,
+            centerMeters: center,
+            halfSizeMeters: halfSize,
+            strokeMeters: strokeMeters,
+            uvOrigin: uvOrigin,
+            uvSize: uvSize,
+            distanceMeters: geometry.distanceMeters,
+            mode: mode,
+            trackingAreaRenderValue: trackingValue,
+            edgeAntialiasMask: edgeAntialiasMask
+        )
+        encoder.setVertexBytes(
+            &uniforms,
+            length: MemoryLayout<PrimitiveUniforms>.stride,
+            index: 0
+        )
+        encoder.setFragmentBytes(
+            &uniforms,
+            length: MemoryLayout<PrimitiveUniforms>.stride,
+            index: 0
+        )
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
     }
 
     private func publishTrackingWaitIfNeeded() {
         guard !isWaitingForTracking else { return }
         isWaitingForTracking = true
-        publishError("Waiting for headset tracking before presenting the test.")
+        publishError("Waiting for headset tracking before presenting the trial.")
     }
 
     private func clearTrackingWaitIfNeeded() {
@@ -398,50 +764,5 @@ actor Renderer {
         Task { @MainActor in
             appModel.statusMessage = nil
         }
-    }
-
-    private func eye(
-        for view: LayerRenderer.Drawable.View,
-        index: Int,
-        viewCount: Int
-    ) -> Eye {
-        guard viewCount > 1 else { return .left }
-
-        let horizontalOffset = view.transform.columns.3.x
-        if abs(horizontalOffset) > 0.0001 {
-            return horizontalOffset < 0 ? .left : .right
-        }
-        return index == 0 ? .left : .right
-    }
-
-    private func color(for eye: Eye, phase: Phase) -> SIMD4<Float>? {
-        switch phase {
-        case .both:
-            return eye == .left ? SIMD4(1, 0, 0, 1) : SIMD4(0, 1, 0, 1)
-        case .leftOnly:
-            return eye == .left ? SIMD4(1, 0, 0, 1) : nil
-        case .rightOnly:
-            return eye == .right ? SIMD4(0, 1, 0, 1) : nil
-        }
-    }
-
-    private func makeUniforms(
-        color: SIMD4<Float>,
-        drawable: LayerRenderer.Drawable,
-        view: LayerRenderer.Drawable.View,
-        viewIndex: Int
-    ) -> SquareUniforms {
-        // Project one shared device-space plane into both calibrated eye
-        // frusta. This is a single binocular target 1.5 metres dead ahead,
-        // rather than two unrelated targets at each texture's midpoint.
-        let projection = drawable.computeProjection(viewIndex: viewIndex)
-        let deviceToView = view.transform.inverse
-
-        return SquareUniforms(
-            clipFromDevice: projection * deviceToView,
-            color: color,
-            halfSizeMeters: SIMD2(repeating: 0.12),
-            distanceMeters: 1.5
-        )
     }
 }

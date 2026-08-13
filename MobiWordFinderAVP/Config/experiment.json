@@ -1,21 +1,22 @@
 {
   "schemaVersion": 1,
   "stimulus": {
+    "eye": "right",
     "targetWord": "COW",
     "randomSeed": 123,
 
-    "letterHeightArcmin": 20,
+    "letterHeightArcmin": 90,
     "letterFontName": "Arial",
-    "letterRGB": [0.0, 0.0, 0.0],
+    "letterRGB": [0.2, 0.2, 0.2],
 
-    "letterBoxWidthArcmin": 30,
-    "letterBoxHeightArcmin": 30,
+    "letterBoxWidthArcmin": 120,
+    "letterBoxHeightArcmin": 120,
     "letterBoxStrokeArcmin": 5,
-    "letterBoxFillRGB": [1.0, 1.0, 1.0],
+    "letterBoxFillRGB": [0.8, 0.8, 0.8],
     "letterBoxStrokeRGB": [0.0, 0.0, 0.0],
 
-    "numberOfLetterBoxesHorizontal": 10,
-    "numberOfLetterBoxesVertical": 10,
+    "numberOfLetterBoxesHorizontal": 8,
+    "numberOfLetterBoxesVertical": 8,
 
     "letterGridHorizontalDeltaDegrees": 0.0,
     "letterGridVerticalDeltaDegrees": 0.0,

@@ -8,13 +8,13 @@ struct LauncherView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Text("Per-eye head-locked test")
+            Text("MobiWordFinderAVP")
                 .font(.title)
 
-            Text("1 s: left red + right green\n1 s: left red only\n1 s: right green only")
+            Text(appModel.trialDescription)
                 .multilineTextAlignment(.center)
 
-            Text("Both eyes target the same point 1.5 metres dead ahead. Keep this window open while testing; the test stops automatically after 30 seconds.")
+            Text("The grid is presented binocularly using the geometry in experiment.json. Keep this window open while testing; the trial stops automatically after 30 seconds.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -26,7 +26,7 @@ struct LauncherView: View {
             } label: {
                 Text(buttonTitle)
             }
-            .disabled(appModel.immersiveSpaceState == .inTransition)
+            .disabled(appModel.immersiveSpaceState == .inTransition || appModel.experiment == nil)
 
             if let statusMessage = appModel.statusMessage {
                 Text(statusMessage)
@@ -48,11 +48,11 @@ struct LauncherView: View {
     private var buttonTitle: String {
         switch appModel.immersiveSpaceState {
         case .closed:
-            return "Start test"
+            return "Start trial"
         case .inTransition:
             return "Please wait…"
         case .open:
-            return "Stop test"
+            return "Stop trial"
         }
     }
 
