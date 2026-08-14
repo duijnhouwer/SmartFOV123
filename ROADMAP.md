@@ -162,7 +162,7 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Record stimulus events using a monotonic clock.
 - [ ] Record participant responses and response latency.
 - [ ] Write one uniquely named session directory per run in the app's Documents container.
-- [ ] Save tabular trial results as `results.csv`.
+- [ ] Save structured trial results as `results.json`.
 - [ ] Copy the exact loaded `experiment.json` into the session directory.
 - [ ] Save `metadata.json` with the Git commit, app version, build number, device model, visionOS version, UTC timestamps, environment identifier, and session status.
 - [ ] Export structured session data with app, protocol, device, and environment versions.
@@ -172,7 +172,7 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 
 ```text
 session-20260813T132500Z-P017/
-├── results.csv
+├── results.json
 ├── experiment.json
 └── metadata.json
 ```
@@ -243,7 +243,7 @@ Scripts should consume `devicectl`'s JSON output rather than parsing its human-r
 2. Make repeated start/stop operation boringly reliable.
 3. Measure timing on hardware.
 4. Define the first bundled `experiment.json` schema.
-5. Define session output and implement `results.csv`, saved configuration, and provenance metadata.
+5. Define session output and implement `results.json`, saved configuration, and provenance metadata.
 6. Prototype a neutral app-owned surround before selecting photographic assets.
 
 ## Non-goals for the current prototype

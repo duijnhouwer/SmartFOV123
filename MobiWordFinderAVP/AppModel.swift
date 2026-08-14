@@ -18,6 +18,7 @@ final class AppModel {
     let plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
+    private let resultFileWriter = ResultFileWriter()
     private let speechListener = SpeechConfirmationListener()
     private var speechRestartTask: Task<Void, Never>?
     private var instantiatedExperiment: Experiment?
@@ -158,9 +159,17 @@ final class AppModel {
             feedbackSoundPlayer.playWrong()
             scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
         } else if candidate == experiment.grid.verificationCode {
-            statusMessage = "Correct — heard \(candidate)."
-            feedbackSoundPlayer.playCorrect()
-            completedTrialToken += 1
+            do {
+                let trialNumber = currentTrialIndex + 1
+                try resultFileWriter.appendCompletedTrial(number: trialNumber)
+                statusMessage = "Correct — heard \(candidate)."
+                feedbackSoundPlayer.playCorrect()
+                completedTrialToken += 1
+            } catch {
+                statusMessage = "Correct response, but trial \(currentTrialIndex + 1) couldn't be saved: \(error.localizedDescription) Say the crossing sequence again to retry."
+                print("MobiWordFinder result error: \(error.localizedDescription)")
+                scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
+            }
         } else {
             statusMessage = "Heard \(candidate), but that isn't the crossing sequence. Try again."
             feedbackSoundPlayer.playWrong()
@@ -175,7 +184,11 @@ final class AppModel {
         trialPhase = .targetCue
         stimulusPresentationState.reset()
         if hasCompletedExperiment {
-            statusMessage = "Experiment complete — all \(trialCount) trials finished."
+            if let fileURL = resultFileWriter.fileURL {
+                statusMessage = "Experiment complete — all \(trialCount) trials finished. Results: Results/\(fileURL.lastPathComponent)"
+            } else {
+                statusMessage = "Experiment complete — all \(trialCount) trials finished."
+            }
         } else if plan.trials.indices.contains(currentTrialIndex) {
             let trial = plan.trials[currentTrialIndex]
             statusMessage = "Ready for trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."

@@ -20,6 +20,10 @@
 	<string>Listen for the three digits spoken to confirm the number's location.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Recognize the three spoken digits used to confirm the number's location.</string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

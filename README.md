@@ -44,6 +44,26 @@ Grid generation happens when each trial is about to run. The target is drawn fir
 
 The app targets visionOS 2.0 or later. Speech recognition uses Apple's Speech framework and prefers on-device recognition when the active recognizer supports it.
 
+## Development result output
+
+> **Testing status:** This result-file writing and Files/AirDrop transfer path has not yet been tested on Apple Vision Pro hardware.
+
+The first completed trial in an app run creates a local-time-stamped file in the app's Documents container:
+
+```text
+Documents/Results/result_20260814_130156.json
+```
+
+For this initial plumbing test, the file is deliberately plain text despite its `.json` extension. Each completed trial appends one line:
+
+```text
+trial1
+trial2
+trial3
+```
+
+A trial advances only after its line is written successfully. The app exposes its Documents directory to the visionOS Files app. To transfer a result manually, open **Files → On My Apple Vision Pro → MobiWordFinderAVP → Results**, pinch and hold the file, choose **Share**, and AirDrop it to the Mac. Keep result files before deleting or reinstalling the development app because doing so can remove its app container.
+
 ## Display compositing
 
 Each resolved condition selects one of two display models in its `fov` section:
