@@ -129,7 +129,9 @@ actor Renderer {
     private let commandQueue: MTLCommandQueue
     private let visualPipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
-    private let stimulusTexture: StimulusTexture
+    private let maskedStimulusTexture: StimulusTexture
+    private let revealedStimulusTexture: StimulusTexture
+    private let presentationState: StimulusPresentationState
     private var loggedProjectionEyes = Set<String>()
     private var lastPublishedState: AppModel.ImmersiveSpaceState?
     private var isWaitingForDeviceTracking = false
@@ -149,6 +151,7 @@ actor Renderer {
         self.layerRenderer = layerRenderer
         self.appModel = appModel
         self.experiment = experiment
+        self.presentationState = appModel.stimulusPresentationState
         self.geometry = StimulusGeometry(configuration: experiment.configuration.stimulus)
 
         let device = layerRenderer.device
@@ -156,10 +159,17 @@ actor Renderer {
             throw RendererError.commandQueueCreationFailed
         }
         self.commandQueue = commandQueue
-        self.stimulusTexture = try StimulusTexture(
+        self.maskedStimulusTexture = try StimulusTexture(
             device: device,
             commandQueue: commandQueue,
-            experiment: experiment
+            experiment: experiment,
+            presentation: .masked
+        )
+        self.revealedStimulusTexture = try StimulusTexture(
+            device: device,
+            commandQueue: commandQueue,
+            experiment: experiment,
+            presentation: .revealed
         )
 
         guard let library = device.makeDefaultLibrary() else {
@@ -359,9 +369,12 @@ actor Renderer {
         }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
         commandBuffer.label = "WordFinder frame"
+        let stimulusTexture = presentationState.showsDigits
+            ? revealedStimulusTexture.texture
+            : maskedStimulusTexture.texture
 
         #if !targetEnvironment(simulator)
-        residencySet.addAllocation(stimulusTexture.texture)
+        residencySet.addAllocation(stimulusTexture)
         for drawable in drawables {
             for texture in drawable.colorTextures {
                 residencySet.addAllocation(texture)
@@ -384,7 +397,7 @@ actor Renderer {
 
         frame.startSubmission()
         for drawable in drawables {
-            render(drawable, into: commandBuffer)
+            render(drawable, into: commandBuffer, stimulusTexture: stimulusTexture)
             drawable.encodePresent(commandBuffer: commandBuffer)
         }
         #if !targetEnvironment(simulator)
@@ -397,7 +410,11 @@ actor Renderer {
         frame.endSubmission()
     }
 
-    private func render(_ drawable: LayerRenderer.Drawable, into commandBuffer: MTLCommandBuffer) {
+    private func render(
+        _ drawable: LayerRenderer.Drawable,
+        into commandBuffer: MTLCommandBuffer,
+        stimulusTexture: MTLTexture
+    ) {
         for (viewIndex, view) in drawable.views.enumerated() {
             let textureMap = view.textureMap
             guard textureMap.textureIndex < drawable.colorTextures.count,
@@ -430,7 +447,7 @@ actor Renderer {
             encoder.setViewport(textureMap.viewport)
             encoder.setRenderPipelineState(visualPipelineState)
             encoder.setDepthStencilState(depthState)
-            encoder.setFragmentTexture(stimulusTexture.texture, index: 0)
+            encoder.setFragmentTexture(stimulusTexture, index: 0)
 
             let clipFromDevice = drawable.computeProjection(viewIndex: viewIndex) * view.transform.inverse
             logProjectionMetricsIfNeeded(

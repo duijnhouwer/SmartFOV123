@@ -9,14 +9,21 @@ final class AppModel {
         case open
     }
 
+    enum TrialPhase: Equatable {
+        case targetCue
+        case search
+    }
+
     let immersiveSpaceID = "MobiWordFinderSpace"
     let plan: ExperimentPlan?
+    let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
     private let speechListener = SpeechConfirmationListener()
     private var speechRestartTask: Task<Void, Never>?
     private var instantiatedExperiment: Experiment?
     private(set) var currentTrialIndex = 0
     private(set) var completedTrialToken = 0
+    private(set) var trialPhase: TrialPhase = .targetCue
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
     var recognizedSpeech: String?
@@ -60,12 +67,18 @@ final class AppModel {
 
     @discardableResult
     func prepareCurrentTrial() async -> Bool {
-        if instantiatedExperiment != nil { return true }
+        if instantiatedExperiment != nil {
+            trialPhase = .targetCue
+            stimulusPresentationState.reset()
+            return true
+        }
         guard let plan, plan.trials.indices.contains(currentTrialIndex) else { return false }
         let scheduledTrial = plan.trials[currentTrialIndex]
         instantiatedExperiment = await Task.detached(priority: .userInitiated) {
             scheduledTrial.instantiate()
         }.value
+        trialPhase = .targetCue
+        stimulusPresentationState.reset()
         return true
     }
 
@@ -94,7 +107,12 @@ final class AppModel {
                 }
             )
             isListening = true
-            statusMessage = "Listening… read the three crossing digits one at a time."
+            switch trialPhase {
+            case .targetCue:
+                statusMessage = "Listening… read the target number shown above the X grid."
+            case .search:
+                statusMessage = "Listening… find the target, then read the three crossing digits."
+            }
         } catch {
             isListening = false
             statusMessage = "Speech recognition couldn't start: \(error.localizedDescription)"
@@ -122,7 +140,22 @@ final class AppModel {
 
         speechListener.stop()
         isListening = false
-        if candidate == experiment.grid.verificationCode {
+
+        if candidate == experiment.grid.targetNumber {
+            if trialPhase == .targetCue {
+                trialPhase = .search
+                stimulusPresentationState.revealGrid()
+                statusMessage = "Target confirmed. Find it, then read the three crossing digits."
+            }
+            // Participants naturally repeat the target while searching. Treat
+            // that as neither correct nor incorrect and start a clean speech
+            // recognition pass without playing feedback.
+            scheduleSpeechRestart(afterNanoseconds: 250_000_000)
+        } else if trialPhase == .targetCue {
+            statusMessage = "Heard \(candidate), but that isn't the target shown above the grid. Try again."
+            feedbackSoundPlayer.playWrong()
+            scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
+        } else if candidate == experiment.grid.verificationCode {
             statusMessage = "Correct — heard \(candidate)."
             feedbackSoundPlayer.playCorrect()
             completedTrialToken += 1
@@ -137,6 +170,8 @@ final class AppModel {
         guard let plan, currentTrialIndex < plan.trials.count else { return }
         currentTrialIndex += 1
         instantiatedExperiment = nil
+        trialPhase = .targetCue
+        stimulusPresentationState.reset()
         if hasCompletedExperiment {
             statusMessage = "Experiment complete — all \(trialCount) trials finished."
         } else if plan.trials.indices.contains(currentTrialIndex) {

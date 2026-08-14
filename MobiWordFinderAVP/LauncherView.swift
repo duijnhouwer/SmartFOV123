@@ -13,7 +13,7 @@ struct LauncherView: View {
             Text(appModel.trialDescription)
                 .multilineTextAlignment(.center)
 
-            Text("The grid is presented using the geometry in experiment.json. Speech recognition listens only during the trial. Keep this window open while testing so you can stop the trial when needed.")
+            Text("Start the sequence here, then follow the target and spoken prompts in the immersive view. Correct responses advance automatically; return to this window only if you need to stop.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -61,6 +61,9 @@ struct LauncherView: View {
                 guard appModel.immersiveSpaceState == .open else { return }
                 await stopTest(message: nil)
                 appModel.advanceAfterCompletedTrial()
+                if !appModel.hasCompletedExperiment {
+                    await startTest()
+                }
             }
         }
     }

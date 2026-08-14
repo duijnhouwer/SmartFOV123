@@ -75,7 +75,7 @@
     {
       "name": "__condition_nr__",
       "inherits": "fov_30_both",
-      "blockNr": 2,
+      "blockNr": 1,
       "repeats": 10,
       "randomSeed": "shuffle"
     }

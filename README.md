@@ -14,7 +14,7 @@ For example, if the target is `536` and the grid contains:
 
 the target runs vertically through the middle column, so the participant says “seven, three, eight.” Target placement always leaves room for this three-cell crossing, which means target centers never occur on a grid edge. The generator accepts a grid only when both the target number and its perpendicular confirmation number occur exactly once across all horizontal and vertical three-digit sequences.
 
-Use **Start trial** in the launcher to grant microphone and speech-recognition access and open the mixed immersive space. The app listens only while the trial is active, shows the latest transcript, accepts digit-by-digit or normal-number transcriptions, and plays the bundled correct/wrong cue. A correct response closes the current immersive trial and advances to the next scheduled trial. The launcher stays open so you can stop a trial reliably; move it aside if it blocks the grid. Trials have no automatic time limit.
+Use **Start trial** in the launcher to grant microphone and speech-recognition access and begin the sequence. Each immersive trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app then accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically to the next scheduled trial, so the participant does not need to look at the launcher again unless they want to stop. Trials have no automatic time limit.
 
 Spoken forms are configured under `speech.aliases` in the main condition. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must resolve to at least one alias, and one alias cannot belong to multiple digits.
 
@@ -40,7 +40,7 @@ Grid generation happens when each trial is about to run. The target is drawn fir
 2. In **Signing & Capabilities**, select your Personal Team.
 3. Pair the headset, enable Developer Mode, and select it as the run destination.
 4. Build and run.
-5. Verify that the digit grid appears, say the three crossing digits one at a time, and confirm that the app reports and plays the correct result.
+5. Verify that an X grid and unboxed target appear, read the target to reveal the digits, then say the three crossing digits and confirm that the next trial starts automatically.
 
 The app targets visionOS 2.0 or later. Speech recognition uses Apple's Speech framework and prefers on-device recognition when the active recognizer supports it.
 

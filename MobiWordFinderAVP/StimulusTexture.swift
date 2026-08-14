@@ -5,12 +5,18 @@ import Foundation
 import Metal
 
 struct StimulusTexture {
+    enum Presentation {
+        case masked
+        case revealed
+    }
+
     let texture: MTLTexture
 
     init(
         device: MTLDevice,
         commandQueue: MTLCommandQueue,
-        experiment: Experiment
+        experiment: Experiment,
+        presentation: Presentation
     ) throws {
         let config = experiment.configuration.stimulus
         let display = experiment.configuration.display
@@ -149,6 +155,16 @@ struct StimulusTexture {
                     config.digitRGB.cgColor
             ]
 
+            Self.drawText(
+                experiment.grid.targetNumber,
+                centeredAt: CGPoint(
+                    x: gridRect.midX,
+                    y: gridRect.maxY + desiredCapHeight
+                ),
+                attributes: attributes,
+                in: context
+            )
+
             for index in experiment.grid.digits.indices {
                 let row = index / experiment.grid.columns
                 let column = index % experiment.grid.columns
@@ -156,24 +172,15 @@ struct StimulusTexture {
                     x: gridRect.minX + (CGFloat(column) + 0.5) * boxWidth,
                     y: gridRect.maxY - (CGFloat(row) + 0.5) * boxHeight
                 )
-                let string = String(experiment.grid.digit(at: index)) as CFString
-                let attributed = CFAttributedStringCreate(
-                    nil,
-                    string,
-                    attributes as CFDictionary
-                )!
-                let line = CTLineCreateWithAttributedString(attributed)
-                var ascent: CGFloat = 0
-                var descent: CGFloat = 0
-                var leading: CGFloat = 0
-                let lineWidth = CGFloat(
-                    CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+                let glyph = presentation == .masked
+                    ? "X"
+                    : String(experiment.grid.digit(at: index))
+                Self.drawText(
+                    glyph,
+                    centeredAt: center,
+                    attributes: attributes,
+                    in: context
                 )
-                context.textPosition = CGPoint(
-                    x: center.x - lineWidth / 2,
-                    y: center.y - (ascent + descent) / 2 + descent
-                )
-                CTLineDraw(line, context)
             }
 
             let fovStrokeMeters = Self.sizeMeters(
@@ -228,7 +235,8 @@ struct StimulusTexture {
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw StimulusTextureError.textureCreationFailed
         }
-        texture.label = "Precomposed WordFinder FOV (\(display.mode.rawValue))"
+        let presentationLabel = presentation == .masked ? "masked" : "revealed"
+        texture.label = "Precomposed NumberFinder FOV (\(display.mode.rawValue), \(presentationLabel))"
         pixels.withUnsafeBytes { bytes in
             texture.replace(
                 region: MTLRegionMake2D(0, 0, width, height),
@@ -248,6 +256,31 @@ struct StimulusTexture {
         commandBuffer.commit()
 
         self.texture = texture
+    }
+
+    private static func drawText(
+        _ string: String,
+        centeredAt center: CGPoint,
+        attributes: [NSAttributedString.Key: Any],
+        in context: CGContext
+    ) {
+        let attributed = CFAttributedStringCreate(
+            nil,
+            string as CFString,
+            attributes as CFDictionary
+        )!
+        let line = CTLineCreateWithAttributedString(attributed)
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        let lineWidth = CGFloat(
+            CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+        )
+        context.textPosition = CGPoint(
+            x: center.x - lineWidth / 2,
+            y: center.y - (ascent + descent) / 2 + descent
+        )
+        CTLineDraw(line, context)
     }
 
     private static func applyDisplayModel(

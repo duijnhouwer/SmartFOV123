@@ -728,6 +728,13 @@ private enum ConditionResolver {
               boxHeight * Float(rows) <= fovHeight else {
             throw invalid(definitionName, "the centered box grid does not fit inside the FOV.")
         }
+        let spaceAboveCenteredGrid = (fovHeight - boxHeight * Float(rows)) / 2
+        guard spaceAboveCenteredGrid >= digitHeight * 1.5 else {
+            throw invalid(
+                definitionName,
+                "the FOV needs at least 1.5 digit heights above the centered grid for the target cue."
+            )
+        }
         guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw invalid(definitionName, "digits.fontName must not be empty.")
         }
