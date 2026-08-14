@@ -14,10 +14,21 @@ struct LauncherView: View {
             Text(appModel.trialDescription)
                 .multilineTextAlignment(.center)
 
-            Text("The grid is presented binocularly using the geometry in experiment.json. Keep this window open while testing; the trial stops automatically after 30 seconds.")
+            Text("The grid is presented using the geometry in experiment.json. Speech recognition listens only during the trial. Keep this window open while testing; the trial stops automatically after 30 seconds.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+
+            if appModel.isListening {
+                Label("Listening for three digits", systemImage: "mic.fill")
+                    .foregroundStyle(.green)
+            }
+
+            if let recognizedSpeech = appModel.recognizedSpeech {
+                Text("Heard: \(recognizedSpeech)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Button {
                 Task { @MainActor in
@@ -72,13 +83,19 @@ struct LauncherView: View {
     private func startTest() async {
         safetyStopTask?.cancel()
         appModel.immersiveSpaceState = .inTransition
-        appModel.statusMessage = nil
+        appModel.statusMessage = "Requesting microphone and speech-recognition access…"
+
+        guard await appModel.requestSpeechAuthorization() else {
+            appModel.immersiveSpaceState = .closed
+            return
+        }
 
         let result = await openImmersiveSpace(id: appModel.immersiveSpaceID)
 
         switch result {
         case .opened:
             appModel.immersiveSpaceState = .open
+            appModel.startSpeechConfirmation()
             scheduleSafetyStop()
         case .userCancelled:
             appModel.immersiveSpaceState = .closed
@@ -96,6 +113,7 @@ struct LauncherView: View {
     private func stopTest(message: String?) async {
         safetyStopTask?.cancel()
         safetyStopTask = nil
+        appModel.stopSpeechConfirmation()
         appModel.immersiveSpaceState = .inTransition
         await dismissImmersiveSpace()
         appModel.immersiveSpaceState = .closed

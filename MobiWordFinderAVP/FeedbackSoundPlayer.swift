@@ -1,7 +1,7 @@
 import AudioToolbox
 import Foundation
 
-final class SelectionSoundPlayer {
+final class FeedbackSoundPlayer {
     private var correctSoundID: SystemSoundID?
     private var wrongSoundID: SystemSoundID?
 

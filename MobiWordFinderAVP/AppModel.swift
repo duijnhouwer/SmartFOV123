@@ -11,9 +11,13 @@ final class AppModel {
 
     let immersiveSpaceID = "MobiWordFinderSpace"
     let experiment: Experiment?
-    private let selectionSoundPlayer = SelectionSoundPlayer()
+    private let feedbackSoundPlayer = FeedbackSoundPlayer()
+    private let speechListener = SpeechConfirmationListener()
+    private var speechRestartTask: Task<Void, Never>?
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
+    var recognizedSpeech: String?
+    var isListening = false
 
     init() {
         do {
@@ -27,24 +31,88 @@ final class AppModel {
 
     var trialDescription: String {
         guard let experiment else { return "No valid experiment is loaded." }
-        let config = experiment.configuration.stimulus
-        return "Find \(config.targetWord) in the \(experiment.grid.columns) × \(experiment.grid.rows) grid. Look at its middle letter and pinch to select it."
+        return "Find \(experiment.grid.targetNumber) in the \(experiment.grid.columns) × \(experiment.grid.rows) grid. Then read the three digits crossing its middle digit, one digit at a time."
     }
 
-    func handleSelection(identifier: UInt64) {
-        guard let experiment else { return }
-        let index = Int(identifier) - 1
-        guard experiment.grid.letters.indices.contains(index) else { return }
+    func requestSpeechAuthorization() async -> Bool {
+        do {
+            try await SpeechConfirmationListener.requestAuthorization()
+            return true
+        } catch {
+            statusMessage = error.localizedDescription
+            return false
+        }
+    }
 
-        let row = index / experiment.grid.columns
-        let column = index % experiment.grid.columns
-        let letter = experiment.grid.letter(at: index)
-        if index == experiment.grid.targetMiddleIndex {
-            statusMessage = "Correct — selected \(letter) at row \(row + 1), column \(column + 1)."
-            selectionSoundPlayer.playCorrect()
+    func startSpeechConfirmation() {
+        speechRestartTask?.cancel()
+        speechRestartTask = nil
+        recognizedSpeech = nil
+
+        do {
+            try speechListener.start(
+                onTranscription: { [weak self] transcript in
+                    self?.handleTranscript(transcript)
+                },
+                onEnded: { [weak self] error in
+                    self?.handleRecognitionEnded(error)
+                }
+            )
+            isListening = true
+            statusMessage = "Listening… read the three crossing digits one at a time."
+        } catch {
+            isListening = false
+            statusMessage = "Speech recognition couldn't start: \(error.localizedDescription)"
+        }
+    }
+
+    func stopSpeechConfirmation() {
+        speechRestartTask?.cancel()
+        speechRestartTask = nil
+        speechListener.stop()
+        isListening = false
+    }
+
+    private func handleTranscript(_ transcript: String) {
+        guard immersiveSpaceState == .open,
+              let experiment else { return }
+
+        recognizedSpeech = transcript
+        guard let candidate = SpokenDigitParser.parseThreeDigits(from: transcript) else {
+            return
+        }
+
+        speechListener.stop()
+        isListening = false
+        if candidate == experiment.grid.verificationCode {
+            statusMessage = "Correct — heard \(candidate)."
+            feedbackSoundPlayer.playCorrect()
         } else {
-            statusMessage = "Selected \(letter) at row \(row + 1), column \(column + 1). Keep looking for \(experiment.grid.targetWord)."
-            selectionSoundPlayer.playWrong()
+            statusMessage = "Heard \(candidate), but that isn't the crossing sequence. Try again."
+            feedbackSoundPlayer.playWrong()
+            scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
+        }
+    }
+
+    private func handleRecognitionEnded(_ error: Error?) {
+        guard immersiveSpaceState == .open else { return }
+        isListening = false
+        if let error {
+            statusMessage = "Speech recognition paused: \(error.localizedDescription) Retrying…"
+        } else {
+            statusMessage = "I didn't catch three digits. Listening again…"
+        }
+        scheduleSpeechRestart(afterNanoseconds: 500_000_000)
+    }
+
+    private func scheduleSpeechRestart(afterNanoseconds delay: UInt64) {
+        speechRestartTask?.cancel()
+        speechRestartTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled,
+                  let self,
+                  self.immersiveSpaceState == .open else { return }
+            self.startSpeechConfirmation()
         }
     }
 }

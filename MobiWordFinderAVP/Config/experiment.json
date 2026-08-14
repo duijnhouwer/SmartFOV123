@@ -1,29 +1,29 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "display": {
     "mode": "opticalSeeThroughSimulation",
     "peakOpacity": 0.35
   },
   "stimulus": {
     "eye": "right",
-    "targetWord": "COW",
+    "targetNumber": "536",
     "randomSeed": 123,
 
-    "letterHeightArcmin": 90,
-    "letterFontName": "Arial",
-    "letterRGB": [0.2, 0.2, 0.2],
+    "digitHeightArcmin": 90,
+    "digitFontName": "Arial",
+    "digitRGB": [0.2, 0.2, 0.2],
 
-    "letterBoxWidthArcmin": 120,
-    "letterBoxHeightArcmin": 120,
-    "letterBoxStrokeArcmin": 5,
-    "letterBoxFillRGB": [0.8, 0.8, 0.8],
-    "letterBoxStrokeRGB": [0.0, 0.0, 0.0],
+    "digitBoxWidthArcmin": 120,
+    "digitBoxHeightArcmin": 120,
+    "digitBoxStrokeArcmin": 5,
+    "digitBoxFillRGB": [0.8, 0.8, 0.8],
+    "digitBoxStrokeRGB": [0.0, 0.0, 0.0],
 
-    "numberOfLetterBoxesHorizontal": 8,
-    "numberOfLetterBoxesVertical": 8,
+    "numberOfDigitBoxesHorizontal": 8,
+    "numberOfDigitBoxesVertical": 8,
 
-    "letterGridHorizontalDeltaDegrees": 0.0,
-    "letterGridVerticalDeltaDegrees": 0.0,
+    "digitGridHorizontalDeltaDegrees": 0.0,
+    "digitGridVerticalDeltaDegrees": 0.0,
 
     "fovWidthDegrees": 21.21,
     "fovHeightDegrees": 21.21,

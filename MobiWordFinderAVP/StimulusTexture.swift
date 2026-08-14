@@ -26,11 +26,11 @@ struct StimulusTexture {
             distance: config.distanceMeters
         )
         let boxWidthMeters = Self.sizeMeters(
-            degrees: config.letterBoxWidthArcmin / 60,
+            degrees: config.digitBoxWidthArcmin / 60,
             distance: config.distanceMeters
         )
         let boxHeightMeters = Self.sizeMeters(
-            degrees: config.letterBoxHeightArcmin / 60,
+            degrees: config.digitBoxHeightArcmin / 60,
             distance: config.distanceMeters
         )
 
@@ -89,11 +89,11 @@ struct StimulusTexture {
             context.fill(fovRect)
 
             let gridDeltaX = Self.offsetMeters(
-                degrees: config.letterGridHorizontalDeltaDegrees,
+                degrees: config.digitGridHorizontalDeltaDegrees,
                 distance: config.distanceMeters
             )
             let gridDeltaY = Self.offsetMeters(
-                degrees: config.letterGridVerticalDeltaDegrees,
+                degrees: config.digitGridVerticalDeltaDegrees,
                 distance: config.distanceMeters
             )
             let gridCenter = CGPoint(
@@ -109,18 +109,18 @@ struct StimulusTexture {
                 height: boxHeight * CGFloat(experiment.grid.rows)
             )
 
-            context.setFillColor(config.letterBoxFillRGB.cgColor)
+            context.setFillColor(config.digitBoxFillRGB.cgColor)
             context.fill(gridRect)
 
             let boxStrokeMeters = Self.sizeMeters(
-                degrees: config.letterBoxStrokeArcmin / 60,
+                degrees: config.digitBoxStrokeArcmin / 60,
                 distance: config.distanceMeters
             )
             let boxStrokePixels = max(
                 0.01,
                 CGFloat(boxStrokeMeters) * (scaleX + scaleY) / 2
             )
-            context.setStrokeColor(config.letterBoxStrokeRGB.cgColor)
+            context.setStrokeColor(config.digitBoxStrokeRGB.cgColor)
             context.setLineWidth(boxStrokePixels)
             context.setLineCap(.butt)
             for column in 0...experiment.grid.columns {
@@ -137,34 +137,34 @@ struct StimulusTexture {
 
             let desiredCapHeight = CGFloat(
                 Self.sizeMeters(
-                    degrees: config.letterHeightArcmin / 60,
+                    degrees: config.digitHeightArcmin / 60,
                     distance: config.distanceMeters
                 )
             ) * scaleY
-            let trialFont = CTFontCreateWithName(config.letterFontName as CFString, 100, nil)
+            let trialFont = CTFontCreateWithName(config.digitFontName as CFString, 100, nil)
             let trialCapHeight = CTFontGetCapHeight(trialFont)
             guard trialCapHeight > 0 else {
-                throw StimulusTextureError.invalidFont(config.letterFontName)
+                throw StimulusTextureError.invalidFont(config.digitFontName)
             }
             let font = CTFontCreateWithName(
-                config.letterFontName as CFString,
+                config.digitFontName as CFString,
                 100 * desiredCapHeight / trialCapHeight,
                 nil
             )
             let attributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): font,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
-                    config.letterRGB.cgColor
+                    config.digitRGB.cgColor
             ]
 
-            for index in experiment.grid.letters.indices {
+            for index in experiment.grid.digits.indices {
                 let row = index / experiment.grid.columns
                 let column = index % experiment.grid.columns
                 let center = CGPoint(
                     x: gridRect.minX + (CGFloat(column) + 0.5) * boxWidth,
                     y: gridRect.maxY - (CGFloat(row) + 0.5) * boxHeight
                 )
-                let string = String(experiment.grid.letter(at: index)) as CFString
+                let string = String(experiment.grid.digit(at: index)) as CFString
                 let attributed = CFAttributedStringCreate(
                     nil,
                     string,

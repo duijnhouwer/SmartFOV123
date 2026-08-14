@@ -60,24 +60,24 @@ enum StimulusEye: String, Decodable, Sendable {
 
 struct StimulusConfiguration: Decodable, Sendable {
     let eye: StimulusEye
-    let targetWord: String
+    let targetNumber: String
     let randomSeed: UInt64
 
-    let letterHeightArcmin: Float
-    let letterFontName: String
-    let letterRGB: RGB
+    let digitHeightArcmin: Float
+    let digitFontName: String
+    let digitRGB: RGB
 
-    let letterBoxWidthArcmin: Float
-    let letterBoxHeightArcmin: Float
-    let letterBoxStrokeArcmin: Float
-    let letterBoxFillRGB: RGB
-    let letterBoxStrokeRGB: RGB
+    let digitBoxWidthArcmin: Float
+    let digitBoxHeightArcmin: Float
+    let digitBoxStrokeArcmin: Float
+    let digitBoxFillRGB: RGB
+    let digitBoxStrokeRGB: RGB
 
-    let numberOfLetterBoxesHorizontal: Int
-    let numberOfLetterBoxesVertical: Int
+    let numberOfDigitBoxesHorizontal: Int
+    let numberOfDigitBoxesVertical: Int
 
-    let letterGridHorizontalDeltaDegrees: Float
-    let letterGridVerticalDeltaDegrees: Float
+    let digitGridHorizontalDeltaDegrees: Float
+    let digitGridVerticalDeltaDegrees: Float
 
     let fovWidthDegrees: Float
     let fovHeightDegrees: Float
@@ -90,7 +90,7 @@ struct StimulusConfiguration: Decodable, Sendable {
     let distanceMeters: Float
 }
 
-struct WordGrid: Sendable {
+struct NumberGrid: Sendable {
     enum Orientation: String, Sendable {
         case horizontal
         case vertical
@@ -104,19 +104,19 @@ struct WordGrid: Sendable {
 
     let rows: Int
     let columns: Int
-    let letters: [UInt8]
-    let targetWord: String
+    let digits: [UInt8]
+    let targetNumber: String
     let targetPlacement: Placement
-    let targetMiddleIndex: Int
+    let verificationCode: String
 
-    func letter(at index: Int) -> Character {
-        Character(UnicodeScalar(letters[index]))
+    func digit(at index: Int) -> Character {
+        Character(UnicodeScalar(digits[index]))
     }
 }
 
 struct Experiment: Sendable {
     let configuration: ExperimentConfiguration
-    let grid: WordGrid
+    let grid: NumberGrid
 
     static func loadBundled() throws -> Experiment {
         guard let url = Bundle.main.url(forResource: "experiment", withExtension: "json") else {
@@ -146,7 +146,7 @@ struct Experiment: Sendable {
         try configuration.validate()
         return Experiment(
             configuration: configuration,
-            grid: try WordGridGenerator.makeGrid(using: configuration.stimulus)
+            grid: try NumberGridGenerator.makeGrid(using: configuration.stimulus)
         )
     }
 
@@ -191,16 +191,16 @@ enum ExperimentError: LocalizedError {
         case .invalidConfiguration(let message):
             return "experiment.json is invalid: \(message)"
         case .gridGenerationFailed:
-            return "A valid WordFinder grid couldn't be generated from the configured seed."
+            return "A valid NumberFinder grid couldn't be generated from the configured seed."
         }
     }
 }
 
 private extension ExperimentConfiguration {
     func validate() throws {
-        guard schemaVersion == 1 else {
+        guard schemaVersion == 2 else {
             throw ExperimentError.invalidConfiguration(
-                "schemaVersion \(schemaVersion) is unsupported; this app requires version 1."
+                "schemaVersion \(schemaVersion) is unsupported; this app requires version 2."
             )
         }
 
@@ -212,39 +212,30 @@ private extension ExperimentConfiguration {
         }
 
         let config = stimulus
-        let word = config.targetWord
-        guard word == word.uppercased(),
-              word.unicodeScalars.allSatisfy({ (65...90).contains($0.value) }) else {
-            throw ExperimentError.invalidConfiguration("targetWord must contain uppercase A–Z only.")
+        let number = config.targetNumber
+        guard number.count == 3,
+              number.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }) else {
+            throw ExperimentError.invalidConfiguration("targetNumber must contain exactly three digits (0–9).")
         }
-        guard word.count >= 3, word.count.isMultiple(of: 2) == false else {
+        guard config.numberOfDigitBoxesHorizontal >= 3,
+              config.numberOfDigitBoxesVertical >= 3 else {
             throw ExperimentError.invalidConfiguration(
-                "targetWord must contain an odd number of at least three letters so it has one selectable middle letter."
+                "The digit grid must be at least 3 × 3 so every target can have a three-digit perpendicular crossing."
             )
         }
-        guard config.numberOfLetterBoxesHorizontal > 0,
-              config.numberOfLetterBoxesVertical > 0 else {
-            throw ExperimentError.invalidConfiguration("The letter-grid dimensions must be positive.")
+        guard config.numberOfDigitBoxesHorizontal <= 254,
+              config.numberOfDigitBoxesVertical <= 254 else {
+            throw ExperimentError.invalidConfiguration("Each digit-grid dimension may be at most 254.")
         }
-        guard config.numberOfLetterBoxesHorizontal <= 254,
-              config.numberOfLetterBoxesVertical <= 254 else {
-            throw ExperimentError.invalidConfiguration("Each letter-grid dimension may be at most 254.")
-        }
-        let cellCount = config.numberOfLetterBoxesHorizontal * config.numberOfLetterBoxesVertical
-        guard cellCount <= 254 else {
-            throw ExperimentError.invalidConfiguration(
-                "The grid may contain at most 254 boxes when using 8-bit visionOS tracking areas."
-            )
-        }
-        guard word.count <= config.numberOfLetterBoxesHorizontal
-                || word.count <= config.numberOfLetterBoxesVertical else {
-            throw ExperimentError.invalidConfiguration("targetWord does not fit horizontally or vertically in the grid.")
+        guard number.count <= config.numberOfDigitBoxesHorizontal
+                || number.count <= config.numberOfDigitBoxesVertical else {
+            throw ExperimentError.invalidConfiguration("targetNumber does not fit horizontally or vertically in the grid.")
         }
 
         let positiveValues: [(String, Float)] = [
-            ("letterHeightArcmin", config.letterHeightArcmin),
-            ("letterBoxWidthArcmin", config.letterBoxWidthArcmin),
-            ("letterBoxHeightArcmin", config.letterBoxHeightArcmin),
+            ("digitHeightArcmin", config.digitHeightArcmin),
+            ("digitBoxWidthArcmin", config.digitBoxWidthArcmin),
+            ("digitBoxHeightArcmin", config.digitBoxHeightArcmin),
             ("fovWidthDegrees", config.fovWidthDegrees),
             ("fovHeightDegrees", config.fovHeightDegrees),
             ("distanceMeters", config.distanceMeters)
@@ -254,26 +245,26 @@ private extension ExperimentConfiguration {
         }
 
         let nonnegativeValues: [(String, Float)] = [
-            ("letterBoxStrokeArcmin", config.letterBoxStrokeArcmin),
+            ("digitBoxStrokeArcmin", config.digitBoxStrokeArcmin),
             ("fovBorderStrokeArcmin", config.fovBorderStrokeArcmin)
         ]
         for (name, value) in nonnegativeValues where !value.isFinite || value < 0 {
             throw ExperimentError.invalidConfiguration("\(name) must be a finite value of zero or greater.")
         }
         let offsetValues: [(String, Float)] = [
-            ("letterGridHorizontalDeltaDegrees", config.letterGridHorizontalDeltaDegrees),
-            ("letterGridVerticalDeltaDegrees", config.letterGridVerticalDeltaDegrees),
+            ("digitGridHorizontalDeltaDegrees", config.digitGridHorizontalDeltaDegrees),
+            ("digitGridVerticalDeltaDegrees", config.digitGridVerticalDeltaDegrees),
             ("fovHorizontalOffsetDegrees", config.fovHorizontalOffsetDegrees),
             ("fovVerticalOffsetDegrees", config.fovVerticalOffsetDegrees)
         ]
         for (name, value) in offsetValues where !value.isFinite {
             throw ExperimentError.invalidConfiguration("\(name) must be finite.")
         }
-        guard config.letterBoxStrokeArcmin * 2 < min(
-            config.letterBoxWidthArcmin,
-            config.letterBoxHeightArcmin
+        guard config.digitBoxStrokeArcmin * 2 < min(
+            config.digitBoxWidthArcmin,
+            config.digitBoxHeightArcmin
         ) else {
-            throw ExperimentError.invalidConfiguration("letterBoxStrokeArcmin is too large for the configured boxes.")
+            throw ExperimentError.invalidConfiguration("digitBoxStrokeArcmin is too large for the configured boxes.")
         }
         guard config.fovBorderStrokeArcmin * 2 < min(
             config.fovWidthDegrees * 60,
@@ -281,70 +272,86 @@ private extension ExperimentConfiguration {
         ) else {
             throw ExperimentError.invalidConfiguration("fovBorderStrokeArcmin is too large for the configured FOV.")
         }
-        guard !config.letterFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ExperimentError.invalidConfiguration("letterFontName must not be empty.")
+        guard !config.digitFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ExperimentError.invalidConfiguration("digitFontName must not be empty.")
         }
     }
 }
 
-private enum WordGridGenerator {
-    static func makeGrid(using config: StimulusConfiguration) throws -> WordGrid {
-        let rows = config.numberOfLetterBoxesVertical
-        let columns = config.numberOfLetterBoxesHorizontal
-        let word = Array(config.targetWord.utf8)
-        let orientations = WordGrid.Orientation.allThatFit(
-            wordLength: word.count,
+private enum NumberGridGenerator {
+    static func makeGrid(using config: StimulusConfiguration) throws -> NumberGrid {
+        let rows = config.numberOfDigitBoxesVertical
+        let columns = config.numberOfDigitBoxesHorizontal
+        let number = Array(config.targetNumber.utf8)
+        let orientations = NumberGrid.Orientation.allThatFit(
+            numberLength: number.count,
             rows: rows,
             columns: columns
         )
         var random = SplitMix64(seed: config.randomSeed)
 
         for _ in 0..<10_000 {
-            var letters = (0..<(rows * columns)).map { _ in
-                UInt8(65 + random.nextInt(upperBound: 26))
+            var digits = (0..<(rows * columns)).map { _ in
+                UInt8(48 + random.nextInt(upperBound: 10))
             }
             let orientation = orientations[random.nextInt(upperBound: orientations.count)]
-            let placement: WordGrid.Placement
+            let placement: NumberGrid.Placement
 
             switch orientation {
             case .horizontal:
                 placement = .init(
-                    row: random.nextInt(upperBound: rows),
-                    column: random.nextInt(upperBound: columns - word.count + 1),
+                    row: 1 + random.nextInt(upperBound: rows - 2),
+                    column: random.nextInt(upperBound: columns - number.count + 1),
                     orientation: orientation
                 )
             case .vertical:
                 placement = .init(
-                    row: random.nextInt(upperBound: rows - word.count + 1),
-                    column: random.nextInt(upperBound: columns),
+                    row: random.nextInt(upperBound: rows - number.count + 1),
+                    column: 1 + random.nextInt(upperBound: columns - 2),
                     orientation: orientation
                 )
             }
 
-            for (offset, character) in word.enumerated() {
+            for (offset, digit) in number.enumerated() {
                 let row = placement.row + (orientation == .vertical ? offset : 0)
                 let column = placement.column + (orientation == .horizontal ? offset : 0)
-                letters[row * columns + column] = character
+                digits[row * columns + column] = digit
             }
 
             let occurrences = findOccurrences(
-                of: word,
-                in: letters,
+                of: number,
+                in: digits,
                 rows: rows,
                 columns: columns
             )
             guard occurrences == [placement] else { continue }
 
-            let middleOffset = word.count / 2
+            let middleOffset = number.count / 2
             let middleRow = placement.row + (orientation == .vertical ? middleOffset : 0)
             let middleColumn = placement.column + (orientation == .horizontal ? middleOffset : 0)
-            return WordGrid(
+            let verificationIndices: [Int]
+            switch orientation {
+            case .horizontal:
+                verificationIndices = [middleRow - 1, middleRow, middleRow + 1].map {
+                    $0 * columns + middleColumn
+                }
+            case .vertical:
+                verificationIndices = [middleColumn - 1, middleColumn, middleColumn + 1].map {
+                    middleRow * columns + $0
+                }
+            }
+            let verificationCode = String(
+                bytes: verificationIndices.map { digits[$0] },
+                encoding: .ascii
+            )!
+
+            return NumberGrid(
                 rows: rows,
                 columns: columns,
-                letters: letters,
-                targetWord: config.targetWord,
+                digits: digits,
+                targetNumber: config.targetNumber,
                 targetPlacement: placement,
-                targetMiddleIndex: middleRow * columns + middleColumn
+                verificationCode: verificationCode
             )
         }
 
@@ -352,18 +359,18 @@ private enum WordGridGenerator {
     }
 
     private static func findOccurrences(
-        of word: [UInt8],
-        in letters: [UInt8],
+        of number: [UInt8],
+        in digits: [UInt8],
         rows: Int,
         columns: Int
-    ) -> [WordGrid.Placement] {
-        var matches: [WordGrid.Placement] = []
+    ) -> [NumberGrid.Placement] {
+        var matches: [NumberGrid.Placement] = []
 
-        if word.count <= columns {
+        if number.count <= columns {
             for row in 0..<rows {
-                for column in 0...(columns - word.count) {
-                    let isMatch = word.indices.allSatisfy { offset in
-                        letters[row * columns + column + offset] == word[offset]
+                for column in 0...(columns - number.count) {
+                    let isMatch = number.indices.allSatisfy { offset in
+                        digits[row * columns + column + offset] == number[offset]
                     }
                     if isMatch {
                         matches.append(.init(row: row, column: column, orientation: .horizontal))
@@ -372,11 +379,11 @@ private enum WordGridGenerator {
             }
         }
 
-        if word.count <= rows {
-            for row in 0...(rows - word.count) {
+        if number.count <= rows {
+            for row in 0...(rows - number.count) {
                 for column in 0..<columns {
-                    let isMatch = word.indices.allSatisfy { offset in
-                        letters[(row + offset) * columns + column] == word[offset]
+                    let isMatch = number.indices.allSatisfy { offset in
+                        digits[(row + offset) * columns + column] == number[offset]
                     }
                     if isMatch {
                         matches.append(.init(row: row, column: column, orientation: .vertical))
@@ -389,11 +396,11 @@ private enum WordGridGenerator {
     }
 }
 
-private extension WordGrid.Orientation {
-    static func allThatFit(wordLength: Int, rows: Int, columns: Int) -> [Self] {
+private extension NumberGrid.Orientation {
+    static func allThatFit(numberLength: Int, rows: Int, columns: Int) -> [Self] {
         var orientations: [Self] = []
-        if wordLength <= columns { orientations.append(.horizontal) }
-        if wordLength <= rows { orientations.append(.vertical) }
+        if numberLength <= columns, rows >= 3 { orientations.append(.horizontal) }
+        if numberLength <= rows, columns >= 3 { orientations.append(.vertical) }
         return orientations
     }
 }

@@ -8,7 +8,6 @@ struct StimulusUniforms {
     float2 fovCenterMeters;
     float2 fovHalfSizeMeters;
     float distanceMeters;
-    uint trackingAreaRenderValue;
 };
 
 struct VertexOut {
@@ -18,12 +17,6 @@ struct VertexOut {
 
 struct VisualFragmentOut {
     float4 color [[color(0)]];
-    float depth [[depth(any)]];
-};
-
-struct TrackingFragmentOut {
-    float4 color [[color(0)]];
-    uint16_t trackingAreaRenderValue [[color(1)]];
     float depth [[depth(any)]];
 };
 
@@ -80,19 +73,6 @@ fragment VisualFragmentOut stimulusFragment(
     float4 color = sampleStimulus(in, stimulusTexture);
     return VisualFragmentOut {
         color,
-        compositorDepth(in, color.a)
-    };
-}
-
-fragment TrackingFragmentOut stimulusTrackingFragment(
-    VertexOut in [[stage_in]],
-    constant StimulusUniforms &uniforms [[buffer(0)]],
-    texture2d<float> stimulusTexture [[texture(0)]])
-{
-    float4 color = sampleStimulus(in, stimulusTexture);
-    return TrackingFragmentOut {
-        color,
-        uint16_t(uniforms.trackingAreaRenderValue),
         compositorDepth(in, color.a)
     };
 }

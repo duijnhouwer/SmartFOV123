@@ -35,7 +35,6 @@ private struct StimulusUniforms {
     var fovCenterMeters: SIMD2<Float>
     var fovHalfSizeMeters: SIMD2<Float>
     var distanceMeters: Float
-    var trackingAreaRenderValue: UInt32
 }
 
 private struct StimulusGeometry {
@@ -43,8 +42,7 @@ private struct StimulusGeometry {
     let fovCenterMeters: SIMD2<Float>
     let fovHalfSizeMeters: SIMD2<Float>
     let gridCenterMeters: SIMD2<Float>
-    let boxSizeMeters: SIMD2<Float>
-    let letterHeightMeters: Float
+    let digitHeightMeters: Float
 
     init(configuration: StimulusConfiguration) {
         distanceMeters = configuration.distanceMeters
@@ -70,36 +68,17 @@ private struct StimulusGeometry {
         )
         gridCenterMeters = fovCenterMeters + SIMD2(
             Self.offsetMeters(
-                degrees: configuration.letterGridHorizontalDeltaDegrees,
+                degrees: configuration.digitGridHorizontalDeltaDegrees,
                 distance: configuration.distanceMeters
             ),
             Self.offsetMeters(
-                degrees: configuration.letterGridVerticalDeltaDegrees,
+                degrees: configuration.digitGridVerticalDeltaDegrees,
                 distance: configuration.distanceMeters
             )
         )
-        boxSizeMeters = SIMD2(
-            Self.sizeMeters(
-                degrees: configuration.letterBoxWidthArcmin / 60,
-                distance: configuration.distanceMeters
-            ),
-            Self.sizeMeters(
-                degrees: configuration.letterBoxHeightArcmin / 60,
-                distance: configuration.distanceMeters
-            )
-        )
-        letterHeightMeters = Self.sizeMeters(
-            degrees: configuration.letterHeightArcmin / 60,
+        digitHeightMeters = Self.sizeMeters(
+            degrees: configuration.digitHeightArcmin / 60,
             distance: configuration.distanceMeters
-        )
-    }
-
-    func boxCenter(row: Int, column: Int, rows: Int, columns: Int) -> SIMD2<Float> {
-        let horizontalIndex = Float(column) - Float(columns - 1) / 2
-        let verticalIndex = Float(rows - 1) / 2 - Float(row)
-        return gridCenterMeters + SIMD2(
-            horizontalIndex * boxSizeMeters.x,
-            verticalIndex * boxSizeMeters.y
         )
     }
 
@@ -158,12 +137,11 @@ actor Renderer {
     private let worldTracking = WorldTrackingProvider()
     private let commandQueue: MTLCommandQueue
     private let visualPipelineState: MTLRenderPipelineState
-    private let trackingPipelineState: MTLRenderPipelineState?
     private let depthState: MTLDepthStencilState
     private let stimulusTexture: StimulusTexture
     private var loggedProjectionEyes = Set<String>()
     private var lastPublishedState: AppModel.ImmersiveSpaceState?
-    private var isWaitingForTracking = false
+    private var isWaitingForDeviceTracking = false
     #if !targetEnvironment(simulator)
     private let residencySets: [MTLResidencySet]
     private let endFrameEvent: MTLSharedEvent
@@ -202,14 +180,9 @@ actor Renderer {
             throw RendererError.shaderFunctionMissing("stimulusFragment")
         }
 
-        func makePipelineDescriptor(
-            fragmentFunction: MTLFunction,
-            includesTrackingArea: Bool
-        ) -> MTLRenderPipelineDescriptor {
+        func makePipelineDescriptor(fragmentFunction: MTLFunction) -> MTLRenderPipelineDescriptor {
             let descriptor = MTLRenderPipelineDescriptor()
-            descriptor.label = includesTrackingArea
-                ? "WordFinder visual and tracking-area pipeline"
-                : "WordFinder visual pipeline"
+            descriptor.label = "NumberFinder visual pipeline"
             descriptor.vertexFunction = vertexFunction
             descriptor.fragmentFunction = fragmentFunction
             descriptor.colorAttachments[0].pixelFormat = layerRenderer.configuration.colorFormat
@@ -218,37 +191,14 @@ actor Renderer {
             // prior pixels lets black in the optical-see-through simulation
             // punch transparent holes through previously drawn surfaces.
             descriptor.colorAttachments[0].isBlendingEnabled = false
-            if #available(visionOS 26.0, *), includesTrackingArea {
-                descriptor.colorAttachments[1].pixelFormat = layerRenderer.configuration.trackingAreasFormat
-            }
             descriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
             return descriptor
         }
 
         do {
             visualPipelineState = try device.makeRenderPipelineState(
-                descriptor: makePipelineDescriptor(
-                    fragmentFunction: visualFragmentFunction,
-                    includesTrackingArea: false
-                )
+                descriptor: makePipelineDescriptor(fragmentFunction: visualFragmentFunction)
             )
-
-            if #available(visionOS 26.0, *),
-               layerRenderer.configuration.trackingAreasFormat != .invalid {
-                guard let trackingFragmentFunction = library.makeFunction(
-                    name: "stimulusTrackingFragment"
-                ) else {
-                    throw RendererError.shaderFunctionMissing("stimulusTrackingFragment")
-                }
-                trackingPipelineState = try device.makeRenderPipelineState(
-                    descriptor: makePipelineDescriptor(
-                        fragmentFunction: trackingFragmentFunction,
-                        includesTrackingArea: true
-                    )
-                )
-            } else {
-                trackingPipelineState = nil
-            }
         } catch let error as RendererError {
             throw error
         } catch {
@@ -259,8 +209,7 @@ actor Renderer {
         // Every WordFinder primitive lies on one stimulus plane. Comparing
         // coplanar depths causes unstable z-fighting between the FOV, boxes,
         // and glyphs. Always accept fragments so painter's order determines
-        // their appearance, while retaining depth writes because visionOS
-        // uses the depth surface with tracking areas for gaze interaction.
+        // their appearance while retaining depth writes for composition.
         depthDescriptor.depthCompareFunction = .always
         depthDescriptor.isDepthWriteEnabled = true
         guard let depthState = device.makeDepthStencilState(descriptor: depthDescriptor) else {
@@ -390,10 +339,10 @@ actor Renderer {
               let deviceAnchor = worldTracking.queryDeviceAnchor(
                 atTimestamp: timing.presentationTime.timeInterval
               ) else {
-            publishTrackingWaitIfNeeded()
+            publishDeviceTrackingWaitIfNeeded()
             return
         }
-        clearTrackingWaitIfNeeded()
+        clearDeviceTrackingWaitIfNeeded()
 
         let drawables: [LayerRenderer.Drawable]
         if #available(visionOS 26.0, *) {
@@ -419,11 +368,6 @@ actor Renderer {
             }
             for texture in drawable.depthTextures {
                 residencySet.addAllocation(texture)
-            }
-            if #available(visionOS 26.0, *) {
-                for texture in drawable.trackingAreasTextures {
-                    residencySet.addAllocation(texture)
-                }
             }
         }
         residencySet.commit()
@@ -454,8 +398,6 @@ actor Renderer {
     }
 
     private func render(_ drawable: LayerRenderer.Drawable, into commandBuffer: MTLCommandBuffer) {
-        let trackingValues = makeTrackingAreas(for: drawable)
-
         for (viewIndex, view) in drawable.views.enumerated() {
             let textureMap = view.textureMap
             guard textureMap.textureIndex < drawable.colorTextures.count,
@@ -479,19 +421,6 @@ actor Renderer {
             depthAttachment.storeAction = .store
             depthAttachment.clearDepth = 0
 
-            var usesTrackingPipeline = false
-            if #available(visionOS 26.0, *),
-               trackingPipelineState != nil,
-               textureMap.textureIndex < drawable.trackingAreasTextures.count {
-                let trackingAttachment = descriptor.colorAttachments[1]!
-                trackingAttachment.texture = drawable.trackingAreasTextures[textureMap.textureIndex]
-                trackingAttachment.slice = textureMap.sliceIndex
-                trackingAttachment.loadAction = .clear
-                trackingAttachment.storeAction = .store
-                trackingAttachment.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-                usesTrackingPipeline = true
-            }
-
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
                 publishError("Metal couldn't create a render encoder.")
                 continue
@@ -499,9 +428,7 @@ actor Renderer {
 
             encoder.label = viewIndex == 0 ? "WordFinder left view" : "WordFinder right view"
             encoder.setViewport(textureMap.viewport)
-            encoder.setRenderPipelineState(
-                usesTrackingPipeline ? trackingPipelineState! : visualPipelineState
-            )
+            encoder.setRenderPipelineState(visualPipelineState)
             encoder.setDepthStencilState(depthState)
             encoder.setFragmentTexture(stimulusTexture.texture, index: 0)
 
@@ -513,11 +440,7 @@ actor Renderer {
                 viewport: textureMap.viewport
             )
             if shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform) {
-                drawStimulus(
-                    encoder: encoder,
-                    clipFromDevice: clipFromDevice,
-                    trackingValues: trackingValues
-                )
+                drawStimulus(encoder: encoder, clipFromDevice: clipFromDevice)
             }
             encoder.endEncoding()
         }
@@ -561,7 +484,7 @@ actor Renderer {
         ).rawValue
         guard loggedProjectionEyes.insert(eyeLabel).inserted else { return }
 
-        let halfHeight = geometry.letterHeightMeters / 2
+        let halfHeight = geometry.digitHeightMeters / 2
         let bottom = clipFromDevice * SIMD4<Float>(
             geometry.gridCenterMeters.x,
             geometry.gridCenterMeters.y - halfHeight,
@@ -577,10 +500,10 @@ actor Renderer {
         guard bottom.w != 0, top.w != 0 else { return }
         let normalizedDeviceHeight = abs(top.y / top.w - bottom.y / bottom.w)
         let projectedPixelHeight = Double(normalizedDeviceHeight) * viewport.height / 2
-        let configuredArcminutes = experiment.configuration.stimulus.letterHeightArcmin
+        let configuredArcminutes = experiment.configuration.stimulus.digitHeightArcmin
         print(
             String(
-                format: "MobiWordFinder: %@ eye viewport %.0f x %.0f; %.1f arcmin letter cap height projects to %.2f pixels.",
+                format: "MobiWordFinder: %@ eye viewport %.0f x %.0f; %.1f arcmin digit cap height projects to %.2f pixels.",
                 eyeLabel,
                 viewport.width,
                 viewport.height,
@@ -590,59 +513,23 @@ actor Renderer {
         )
     }
 
-    private func makeTrackingAreas(for drawable: LayerRenderer.Drawable) -> [UInt16] {
-        guard #available(visionOS 26.0, *), trackingPipelineState != nil else {
-            return [UInt16](repeating: 0, count: experiment.grid.letters.count)
-        }
-
-        return experiment.grid.letters.indices.map { index in
-            let trackingArea = drawable.addTrackingArea(identifier: .init(UInt64(index + 1)))
-            trackingArea.addHoverEffect(.automatic)
-            return trackingArea.renderValue.rawValue
-        }
-    }
-
     private func drawStimulus(
         encoder: MTLRenderCommandEncoder,
-        clipFromDevice: simd_float4x4,
-        trackingValues: [UInt16]
+        clipFromDevice: simd_float4x4
     ) {
         drawTexturedQuad(
             encoder: encoder,
             clipFromDevice: clipFromDevice,
             center: geometry.fovCenterMeters,
-            halfSize: geometry.fovHalfSizeMeters,
-            trackingValue: 0
+            halfSize: geometry.fovHalfSizeMeters
         )
-
-        guard trackingPipelineState != nil else { return }
-        for index in experiment.grid.letters.indices {
-            let row = index / experiment.grid.columns
-            let column = index % experiment.grid.columns
-            let center = geometry.boxCenter(
-                row: row,
-                column: column,
-                rows: experiment.grid.rows,
-                columns: experiment.grid.columns
-            )
-            let trackingValue = UInt32(trackingValues[index])
-
-            drawTexturedQuad(
-                encoder: encoder,
-                clipFromDevice: clipFromDevice,
-                center: center,
-                halfSize: geometry.boxSizeMeters / 2,
-                trackingValue: trackingValue
-            )
-        }
     }
 
     private func drawTexturedQuad(
         encoder: MTLRenderCommandEncoder,
         clipFromDevice: simd_float4x4,
         center: SIMD2<Float>,
-        halfSize: SIMD2<Float>,
-        trackingValue: UInt32
+        halfSize: SIMD2<Float>
     ) {
         var uniforms = StimulusUniforms(
             clipFromDevice: clipFromDevice,
@@ -650,15 +537,9 @@ actor Renderer {
             halfSizeMeters: halfSize,
             fovCenterMeters: geometry.fovCenterMeters,
             fovHalfSizeMeters: geometry.fovHalfSizeMeters,
-            distanceMeters: geometry.distanceMeters,
-            trackingAreaRenderValue: trackingValue
+            distanceMeters: geometry.distanceMeters
         )
         encoder.setVertexBytes(
-            &uniforms,
-            length: MemoryLayout<StimulusUniforms>.stride,
-            index: 0
-        )
-        encoder.setFragmentBytes(
             &uniforms,
             length: MemoryLayout<StimulusUniforms>.stride,
             index: 0
@@ -666,17 +547,19 @@ actor Renderer {
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
     }
 
-    private func publishTrackingWaitIfNeeded() {
-        guard !isWaitingForTracking else { return }
-        isWaitingForTracking = true
+    private func publishDeviceTrackingWaitIfNeeded() {
+        guard !isWaitingForDeviceTracking else { return }
+        isWaitingForDeviceTracking = true
         publishError("Waiting for headset tracking before presenting the trial.")
     }
 
-    private func clearTrackingWaitIfNeeded() {
-        guard isWaitingForTracking else { return }
-        isWaitingForTracking = false
+    private func clearDeviceTrackingWaitIfNeeded() {
+        guard isWaitingForDeviceTracking else { return }
+        isWaitingForDeviceTracking = false
         Task { @MainActor in
-            appModel.statusMessage = nil
+            if appModel.statusMessage == "Waiting for headset tracking before presenting the trial." {
+                appModel.statusMessage = nil
+            }
         }
     }
 }
