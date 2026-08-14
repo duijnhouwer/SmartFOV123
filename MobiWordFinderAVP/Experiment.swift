@@ -747,8 +747,11 @@ private enum ConditionResolver {
         guard peakOpacity.isFinite, (0...1).contains(peakOpacity) else {
             throw invalid(definitionName, "fov.peak_opacity must be between 0 and 1.")
         }
-        guard columns >= 3, rows >= 3 else {
-            throw invalid(definitionName, "the box grid must be at least 3 × 3.")
+        guard columns >= 4 else {
+            throw invalid(definitionName, "boxes.number_horizontal must be at least 4.")
+        }
+        guard rows >= 4 else {
+            throw invalid(definitionName, "boxes.number_vertical must be at least 4.")
         }
         guard columns <= 254, rows <= 254 else {
             throw invalid(definitionName, "each box-grid dimension may be at most 254.")
