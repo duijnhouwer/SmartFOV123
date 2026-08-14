@@ -44,13 +44,13 @@ final class AppModel {
         }
     }
 
-    func startSpeechConfirmation() {
+    func startSpeechConfirmation() async {
         speechRestartTask?.cancel()
         speechRestartTask = nil
         recognizedSpeech = nil
 
         do {
-            try speechListener.start(
+            try await speechListener.start(
                 onTranscription: { [weak self] transcript in
                     self?.handleTranscript(transcript)
                 },
@@ -115,7 +115,7 @@ final class AppModel {
             guard !Task.isCancelled,
                   let self,
                   self.immersiveSpaceState == .open else { return }
-            self.startSpeechConfirmation()
+            await self.startSpeechConfirmation()
         }
     }
 }

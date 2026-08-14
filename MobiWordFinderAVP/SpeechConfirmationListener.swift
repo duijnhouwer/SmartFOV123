@@ -25,6 +25,9 @@ final class SpeechConfirmationListener {
     }
 
     private let audioEngine = AVAudioEngine()
+    private static let audioSessionQueue = DispatchQueue(
+        label: "MobiWordFinderAVP.AudioSession"
+    )
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en_US"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -46,12 +49,15 @@ final class SpeechConfirmationListener {
     func start(
         onTranscription: @escaping (String) -> Void,
         onEnded: @escaping (Error?) -> Void
-    ) throws {
+    ) async throws {
         stop()
 
         guard let recognizer, recognizer.isAvailable else {
             throw ListenerError.recognizerUnavailable
         }
+
+        let currentSessionID = UUID()
+        sessionID = currentSessionID
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -64,19 +70,26 @@ final class SpeechConfirmationListener {
             request.requiresOnDeviceRecognition = true
         }
 
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
-        try audioSession.setActive(true)
+        do {
+            try await Self.configureAndActivateAudioSession()
+        } catch {
+            if sessionID == currentSessionID {
+                sessionID = nil
+            }
+            throw error
+        }
+        guard sessionID == currentSessionID else {
+            throw CancellationError()
+        }
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            sessionID = nil
+            Self.deactivateAudioSession()
             throw ListenerError.microphoneUnavailable
         }
 
-        let currentSessionID = UUID()
-        sessionID = currentSessionID
         recognitionRequest = request
 
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
@@ -135,10 +148,35 @@ final class SpeechConfirmationListener {
             audioEngine.inputNode.removeTap(onBus: 0)
             hasInputTap = false
         }
-        try? AVAudioSession.sharedInstance().setActive(
-            false,
-            options: .notifyOthersOnDeactivation
-        )
+        Self.deactivateAudioSession()
+    }
+
+    private static func configureAndActivateAudioSession() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            audioSessionQueue.async {
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    try audioSession.setCategory(
+                        .record,
+                        mode: .measurement,
+                        options: .duckOthers
+                    )
+                    try audioSession.setActive(true)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func deactivateAudioSession() {
+        audioSessionQueue.async {
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
     }
 
     private static func requestMicrophoneAuthorization() async -> Bool {
