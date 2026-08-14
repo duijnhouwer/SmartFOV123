@@ -19,7 +19,7 @@ struct LauncherView: View {
                 .multilineTextAlignment(.center)
 
             if appModel.isListening {
-                Label("Listening for three digits", systemImage: "mic.fill")
+                Label(listeningLabel, systemImage: "mic.fill")
                     .foregroundStyle(.green)
             }
 
@@ -66,16 +66,34 @@ struct LauncherView: View {
                 }
             }
         }
+        .onChange(of: appModel.beginExperimentToken) { _, _ in
+            Task { @MainActor in
+                guard appModel.immersiveSpaceState == .open else { return }
+                await stopTest(message: nil)
+                await startTest()
+            }
+        }
     }
 
     private var buttonTitle: String {
         switch appModel.immersiveSpaceState {
         case .closed:
-            return "Start trial"
+            return "Start sequence"
         case .inTransition:
             return "Please wait…"
         case .open:
-            return "Stop trial"
+            return "Stop sequence"
+        }
+    }
+
+    private var listeningLabel: String {
+        switch appModel.trialPhase {
+        case .participantConfirmation:
+            return "Listening for yes, no, or quit"
+        case .instructions:
+            return "Listening for begin or quit"
+        case .participantNumber, .targetCue, .search:
+            return "Listening for digits"
         }
     }
 
@@ -107,12 +125,14 @@ struct LauncherView: View {
             return
         }
 
-        let result = await openImmersiveSpace(id: appModel.immersiveSpaceID)
+        appModel.prepareImmersivePresentation()
+
+        let result = await openImmersiveSpace(id: appModel.activeImmersiveSpaceID)
 
         switch result {
         case .opened:
             appModel.immersiveSpaceState = .open
-            appModel.markCurrentTrialStarted()
+            appModel.markCurrentTrialStartedIfReady()
             await appModel.startSpeechConfirmation()
         case .userCancelled:
             appModel.immersiveSpaceState = .closed

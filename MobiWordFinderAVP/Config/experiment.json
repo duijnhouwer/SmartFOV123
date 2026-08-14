@@ -1,5 +1,8 @@
 {
   "schema_version": 5,
+  "protocol_name": "example",
+  "subject_number_digit_count": 3,
+  "instructions": "Find the three-digit target number in the grid. First, read the target number aloud to reveal the digits. Then search for the target and read the three-digit number that crosses its middle digit, one digit at a time. A sound will indicate whether your response was correct. The next trial begins automatically after a correct response.",
   "conditions": [
     {
       "name": "master",

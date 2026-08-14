@@ -1,22 +1,34 @@
 import Foundation
 
 final class StimulusPresentationState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var isGridRevealed = false
+    enum Content: Equatable, Sendable {
+        case hidden
+        case maskedGrid
+        case revealedGrid
+    }
 
-    var showsDigits: Bool {
-        lock.withLock { isGridRevealed }
+    private let lock = NSLock()
+    private var currentContent: Content = .maskedGrid
+
+    var content: Content {
+        lock.withLock { currentContent }
     }
 
     func reset() {
         lock.withLock {
-            isGridRevealed = false
+            currentContent = .maskedGrid
         }
     }
 
     func revealGrid() {
         lock.withLock {
-            isGridRevealed = true
+            currentContent = .revealedGrid
+        }
+    }
+
+    func hide() {
+        lock.withLock {
+            currentContent = .hidden
         }
     }
 }

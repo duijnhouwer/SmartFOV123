@@ -5,6 +5,7 @@ import Foundation
 final class ResultFileWriter {
     private(set) var fileURL: URL?
     private var completedTrials: [CompletedTrial] = []
+    private var experimentMetadata: ResultExperiment?
     private let documentsURLOverride: URL?
     private let now: () -> Date
 
@@ -16,6 +17,19 @@ final class ResultFileWriter {
         self.now = now
     }
 
+    func beginExperiment(
+        protocolName: String,
+        subjectNumber: String,
+        startDate: Date? = nil
+    ) {
+        let startDate = startDate ?? now()
+        experimentMetadata = .init(
+            protocolName: protocolName,
+            subjectNumber: subjectNumber,
+            startDate: startDate
+        )
+    }
+
     @discardableResult
     func appendCompletedTrial(
         _ experiment: Experiment,
@@ -23,7 +37,13 @@ final class ResultFileWriter {
     ) throws -> URL {
         let fileURL = try sessionFileURL()
         let trial = CompletedTrial(experiment: experiment, results: results)
-        let document = ResultDocument(trials: completedTrials + [trial])
+        guard let experimentMetadata else {
+            throw ResultFileError.experimentMetadataMissing
+        }
+        let document = ResultDocument(
+            experiment: experimentMetadata,
+            trials: completedTrials + [trial]
+        )
 
         let data: Data
         do {
@@ -47,6 +67,9 @@ final class ResultFileWriter {
             return fileURL
         }
 
+        guard let experimentMetadata else {
+            throw ResultFileError.experimentMetadataMissing
+        }
         let fileManager = FileManager.default
         let documentsURL: URL
         if let documentsURLOverride {
@@ -84,7 +107,7 @@ final class ResultFileWriter {
         formatter.dateFormat = "yyyyMMdd_HHmmss"
 
         let candidateURL = resultsDirectoryURL.appendingPathComponent(
-            "result_\(formatter.string(from: now())).json",
+            "result_\(experimentMetadata.subjectNumber)_\(formatter.string(from: experimentMetadata.timestamp)).json",
             isDirectory: false
         )
         guard !fileManager.fileExists(atPath: candidateURL.path) else {
@@ -98,7 +121,45 @@ final class ResultFileWriter {
 }
 
 private struct ResultDocument: Encodable {
+    let experiment: ResultExperiment
     let trials: [CompletedTrial]
+}
+
+private struct ResultExperiment: Encodable {
+    let application = "mobiWordFinderAVP"
+    let protocolName: String
+    let subjectNumber: String
+    let startDate: String
+    let startTime: String
+    let timestamp: Date
+
+    init(protocolName: String, subjectNumber: String, startDate: Date) {
+        self.protocolName = protocolName
+        self.subjectNumber = subjectNumber
+        timestamp = startDate
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.calendar = Calendar(identifier: .gregorian)
+        dateFormatter.timeZone = .autoupdatingCurrent
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        self.startDate = dateFormatter.string(from: startDate)
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.calendar = Calendar(identifier: .gregorian)
+        timeFormatter.timeZone = .autoupdatingCurrent
+        timeFormatter.dateFormat = "HH:mm:ssZZZZZ"
+        self.startTime = timeFormatter.string(from: startDate)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case application
+        case protocolName = "protocol_name"
+        case subjectNumber = "subject_number"
+        case startDate = "start_date"
+        case startTime = "start_time"
+    }
 }
 
 struct CompletedTrialResults: Encodable {
@@ -384,7 +445,11 @@ private enum JSONPrettyPrinter {
         let preferredOrder: [String]
 
         if dictionary.keys.contains("trials") {
-            preferredOrder = ["trials"]
+            preferredOrder = ["experiment", "trials"]
+        } else if dictionary.keys.contains("application") {
+            preferredOrder = [
+                "application", "protocol_name", "subject_number", "start_date", "start_time"
+            ]
         } else if dictionary.keys.contains("seeded_stimulus") {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_name") {
@@ -433,6 +498,7 @@ private extension RGB {
 }
 
 private enum ResultFileError: LocalizedError {
+    case experimentMetadataMissing
     case documentsDirectoryUnavailable(Error)
     case couldNotCreateDirectory(URL, Error)
     case fileAlreadyExists(URL)
@@ -442,6 +508,8 @@ private enum ResultFileError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .experimentMetadataMissing:
+            return "The participant number and experiment metadata haven't been confirmed yet."
         case .documentsDirectoryUnavailable(let error):
             return "The app's Documents directory is unavailable: \(error.localizedDescription)"
         case .couldNotCreateDirectory(let url, let error):

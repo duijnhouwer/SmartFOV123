@@ -369,9 +369,20 @@ actor Renderer {
         }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
         commandBuffer.label = "WordFinder frame"
-        let stimulusTexture = presentationState.showsDigits
-            ? revealedStimulusTexture.texture
-            : maskedStimulusTexture.texture
+        let stimulusTexture: MTLTexture
+        let presentationContent = presentationState.content
+        let rendersStimulus: Bool
+        switch presentationContent {
+        case .hidden:
+            stimulusTexture = maskedStimulusTexture.texture
+            rendersStimulus = false
+        case .maskedGrid:
+            stimulusTexture = maskedStimulusTexture.texture
+            rendersStimulus = true
+        case .revealedGrid:
+            stimulusTexture = revealedStimulusTexture.texture
+            rendersStimulus = true
+        }
 
         #if !targetEnvironment(simulator)
         residencySet.addAllocation(stimulusTexture)
@@ -397,7 +408,12 @@ actor Renderer {
 
         frame.startSubmission()
         for drawable in drawables {
-            render(drawable, into: commandBuffer, stimulusTexture: stimulusTexture)
+            render(
+                drawable,
+                into: commandBuffer,
+                stimulusTexture: stimulusTexture,
+                rendersStimulus: rendersStimulus
+            )
             drawable.encodePresent(commandBuffer: commandBuffer)
         }
         #if !targetEnvironment(simulator)
@@ -413,7 +429,8 @@ actor Renderer {
     private func render(
         _ drawable: LayerRenderer.Drawable,
         into commandBuffer: MTLCommandBuffer,
-        stimulusTexture: MTLTexture
+        stimulusTexture: MTLTexture,
+        rendersStimulus: Bool
     ) {
         for (viewIndex, view) in drawable.views.enumerated() {
             let textureMap = view.textureMap
@@ -456,7 +473,8 @@ actor Renderer {
                 clipFromDevice: clipFromDevice,
                 viewport: textureMap.viewport
             )
-            if shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform) {
+            if rendersStimulus,
+               shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform) {
                 drawStimulus(encoder: encoder, clipFromDevice: clipFromDevice)
             }
             encoder.endEncoding()

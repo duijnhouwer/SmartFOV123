@@ -12,6 +12,27 @@ enum SpokenDigitParser {
         "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90
     ]
 
+    static func parseDigits(
+        from transcript: String,
+        aliases: [String: Int],
+        digitCount: Int
+    ) -> String? {
+        guard digitCount > 0 else { return nil }
+        if digitCount == 3 {
+            return parseThreeDigits(from: transcript, aliases: aliases)
+        }
+
+        let tokens = transcript
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+        guard let flattened = flattenDigitTokens(tokens, aliases: aliases),
+              flattened.count == digitCount else {
+            return nil
+        }
+        return flattened
+    }
+
     static func parseThreeDigits(
         from transcript: String,
         aliases: [String: Int]

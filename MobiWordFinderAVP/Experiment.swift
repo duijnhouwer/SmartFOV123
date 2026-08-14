@@ -171,6 +171,9 @@ struct ScheduledTrial: Sendable {
 }
 
 struct ExperimentPlan: Sendable {
+    let protocolName: String
+    let subjectNumberDigitCount: Int
+    let instructions: String
     let trials: [ScheduledTrial]
 
     static func loadBundled() throws -> ExperimentPlan {
@@ -248,10 +251,16 @@ enum ExperimentError: LocalizedError {
 
 private struct ExperimentFile: Decodable {
     let schemaVersion: Int
+    let protocolName: String
+    let subjectNumberDigitCount: Int
+    let instructions: String
     let conditions: [ConditionDefinition]
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
+        case protocolName = "protocol_name"
+        case subjectNumberDigitCount = "subject_number_digit_count"
+        case instructions
         case conditions
     }
 }
@@ -508,6 +517,23 @@ private enum ConditionResolver {
         guard !file.conditions.isEmpty else {
             throw ExperimentError.invalidConfiguration("conditions must contain at least the master condition.")
         }
+        let protocolName = file.protocolName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !protocolName.isEmpty, protocolName == file.protocolName else {
+            throw ExperimentError.invalidConfiguration(
+                "protocol_name must be nonempty and have no leading or trailing whitespace."
+            )
+        }
+        guard (1...12).contains(file.subjectNumberDigitCount) else {
+            throw ExperimentError.invalidConfiguration(
+                "subject_number_digit_count must be between 1 and 12."
+            )
+        }
+        let instructions = file.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instructions.isEmpty, instructions == file.instructions else {
+            throw ExperimentError.invalidConfiguration(
+                "instructions must be nonempty and have no leading or trailing whitespace."
+            )
+        }
 
         try validateDefinitionNames(file.conditions)
         try validateMaster(file.conditions[0])
@@ -600,7 +626,12 @@ private enum ConditionResolver {
                 configuration: configuration
             )
         }
-        return ExperimentPlan(trials: trials)
+        return ExperimentPlan(
+            protocolName: protocolName,
+            subjectNumberDigitCount: file.subjectNumberDigitCount,
+            instructions: instructions,
+            trials: trials
+        )
     }
 
     private static func validateDefinitionNames(_ definitions: [ConditionDefinition]) throws {
@@ -908,7 +939,14 @@ private enum JSONShapeValidator {
             throw ExperimentError.invalidConfiguration("Malformed JSON: \(error.localizedDescription)")
         }
         let root = try dictionary(object, path: "$")
-        try keys(root, allowed: ["schema_version", "conditions"], path: "$")
+        try keys(
+            root,
+            allowed: [
+                "schema_version", "protocol_name", "subject_number_digit_count",
+                "instructions", "conditions"
+            ],
+            path: "$"
+        )
         guard let rawConditions = root["conditions"] as? [Any] else {
             throw invalid("$.conditions", "must be an array.")
         }

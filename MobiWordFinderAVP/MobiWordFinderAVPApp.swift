@@ -15,5 +15,10 @@ struct MobiWordFinderAVPApp: App {
             StimulusCompositorLayer(appModel: appModel)
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
+
+        ImmersiveSpace(id: appModel.participantSpaceID) {
+            ParticipantPromptView(appModel: appModel)
+        }
+        .immersionStyle(selection: .constant(.mixed), in: .mixed)
     }
 }

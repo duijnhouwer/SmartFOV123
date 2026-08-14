@@ -1,4 +1,5 @@
 import Dispatch
+import Darwin
 import SwiftUI
 
 @MainActor
@@ -11,11 +12,21 @@ final class AppModel {
     }
 
     enum TrialPhase: Equatable {
+        case participantNumber
+        case participantConfirmation
+        case instructions
         case targetCue
         case search
     }
 
+    struct ParticipantPrompt: Equatable {
+        let title: String
+        let message: String
+        let emphasizedText: String?
+    }
+
     let immersiveSpaceID = "MobiWordFinderSpace"
+    let participantSpaceID = "MobiWordFinderParticipantSpace"
     let plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
@@ -25,9 +36,14 @@ final class AppModel {
     private var speechRestartTask: Task<Void, Never>?
     private var instantiatedExperiment: Experiment?
     private var currentTrialMeasurement: InProgressTrialMeasurement?
+    private var pendingSubjectNumber: String?
+    private var isRetryingSubjectNumber = false
+    private var hasExperimentBegun = false
     private(set) var currentTrialIndex = 0
     private(set) var completedTrialToken = 0
-    private(set) var trialPhase: TrialPhase = .targetCue
+    private(set) var beginExperimentToken = 0
+    private(set) var subjectNumber: String?
+    private(set) var trialPhase: TrialPhase = .participantNumber
     private(set) var hasConfigurationError = false
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
@@ -49,6 +65,15 @@ final class AppModel {
         instantiatedExperiment
     }
 
+    var activeImmersiveSpaceID: String {
+        switch trialPhase {
+        case .participantNumber, .participantConfirmation, .instructions:
+            participantSpaceID
+        case .targetCue, .search:
+            immersiveSpaceID
+        }
+    }
+
     var trialCount: Int {
         plan?.trials.count ?? 0
     }
@@ -58,6 +83,9 @@ final class AppModel {
     }
 
     var trialDescription: String {
+        if subjectNumber == nil {
+            return "Ready to collect the participant number before trial 1."
+        }
         if hasCompletedExperiment {
             return "Experiment complete — all \(trialCount) trials have been confirmed."
         }
@@ -71,11 +99,39 @@ final class AppModel {
         return "Trial \(trial.trialNumber) of \(trialCount), \(trial.conditionName). The target and grid will be generated when the trial starts."
     }
 
+    var participantPrompt: ParticipantPrompt? {
+        switch trialPhase {
+        case .participantNumber:
+            let digitCount = plan?.subjectNumberDigitCount ?? 3
+            return .init(
+                title: isRetryingSubjectNumber ? "Please try again" : "Welcome!",
+                message: isRetryingSubjectNumber
+                    ? "Please state your \(digitCount)-digit number, one digit at a time."
+                    : "Please state your \(digitCount)-digit participant number.",
+                emphasizedText: nil
+            )
+        case .participantConfirmation:
+            guard let pendingSubjectNumber else { return nil }
+            return .init(
+                title: "The number you said was:",
+                message: "Is that correct?\nSpeak: “Yes”, “No”, or “Quit”",
+                emphasizedText: pendingSubjectNumber
+            )
+        case .instructions:
+            guard let plan else { return nil }
+            return .init(
+                title: "Instructions",
+                message: "\(plan.instructions)\n\nReady to start?\nSpeak: “Begin” or “Quit”",
+                emphasizedText: nil
+            )
+        case .targetCue, .search:
+            return nil
+        }
+    }
+
     @discardableResult
     func prepareCurrentTrial() async -> Bool {
         if instantiatedExperiment != nil {
-            trialPhase = .targetCue
-            stimulusPresentationState.reset()
             return true
         }
         guard let plan, plan.trials.indices.contains(currentTrialIndex) else { return false }
@@ -83,9 +139,27 @@ final class AppModel {
         instantiatedExperiment = await Task.detached(priority: .userInitiated) {
             scheduledTrial.instantiate()
         }.value
-        trialPhase = .targetCue
-        stimulusPresentationState.reset()
         return true
+    }
+
+    func prepareImmersivePresentation() {
+        if !hasExperimentBegun, subjectNumber == nil {
+            pendingSubjectNumber = nil
+            isRetryingSubjectNumber = false
+            trialPhase = .participantNumber
+            stimulusPresentationState.hide()
+        } else if !hasExperimentBegun {
+            trialPhase = .instructions
+            stimulusPresentationState.hide()
+        } else {
+            trialPhase = .targetCue
+            stimulusPresentationState.reset()
+        }
+    }
+
+    func markCurrentTrialStartedIfReady() {
+        guard hasExperimentBegun, trialPhase == .targetCue else { return }
+        markCurrentTrialStarted()
     }
 
     func requestSpeechAuthorization() async -> Bool {
@@ -118,6 +192,12 @@ final class AppModel {
             )
             isListening = true
             switch trialPhase {
+            case .participantNumber:
+                statusMessage = "Listening for the three-digit participant number."
+            case .participantConfirmation:
+                statusMessage = "Listening for yes, no, or quit."
+            case .instructions:
+                statusMessage = "Listening for begin or quit."
             case .targetCue:
                 statusMessage = "Listening… read the target number shown above the X grid."
             case .search:
@@ -141,6 +221,20 @@ final class AppModel {
               let experiment else { return }
 
         recognizedSpeech = transcript
+        switch trialPhase {
+        case .participantNumber:
+            handleParticipantNumber(transcript, experiment: experiment)
+            return
+        case .participantConfirmation:
+            handleParticipantConfirmation(transcript)
+            return
+        case .instructions:
+            handleInstructionsResponse(transcript)
+            return
+        case .targetCue, .search:
+            break
+        }
+
         guard let candidate = SpokenDigitParser.parseThreeDigits(
             from: transcript,
             aliases: experiment.configuration.speech.aliasLookup
@@ -232,6 +326,10 @@ final class AppModel {
         isListening = false
         if let error {
             statusMessage = "Speech recognition paused: \(error.localizedDescription) Retrying…"
+        } else if trialPhase == .participantConfirmation {
+            statusMessage = "I didn't catch yes, no, or quit. Listening again…"
+        } else if trialPhase == .instructions {
+            statusMessage = "I didn't catch begin or quit. Listening again…"
         } else {
             statusMessage = "I didn't catch three digits. Listening again…"
         }
@@ -254,6 +352,93 @@ final class AppModel {
         guard now >= appStartUptimeNanoseconds else { return 0 }
         return (now - appStartUptimeNanoseconds) / 1_000_000
     }
+
+    private func handleParticipantNumber(_ transcript: String, experiment: Experiment) {
+        guard let plan,
+              let candidate = SpokenDigitParser.parseDigits(
+            from: transcript,
+            aliases: experiment.configuration.speech.aliasLookup,
+            digitCount: plan.subjectNumberDigitCount
+        ) else {
+            return
+        }
+
+        pendingSubjectNumber = candidate
+        isRetryingSubjectNumber = false
+        trialPhase = .participantConfirmation
+        speechListener.stop()
+        isListening = false
+        scheduleSpeechRestart(afterNanoseconds: 250_000_000)
+    }
+
+    private func handleParticipantConfirmation(_ transcript: String) {
+        let words = transcript
+            .lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+
+        if words.contains("quit") {
+            requestQuit()
+        }
+
+        if words.contains("yes"), let pendingSubjectNumber {
+            subjectNumber = pendingSubjectNumber
+            self.pendingSubjectNumber = nil
+            trialPhase = .instructions
+            speechListener.stop()
+            isListening = false
+            scheduleSpeechRestart(afterNanoseconds: 250_000_000)
+            return
+        }
+
+        pendingSubjectNumber = nil
+        isRetryingSubjectNumber = true
+        trialPhase = .participantNumber
+        speechListener.stop()
+        isListening = false
+        scheduleSpeechRestart(afterNanoseconds: 250_000_000)
+    }
+
+    private func handleInstructionsResponse(_ transcript: String) {
+        let words = transcript
+            .lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+
+        if words.contains("quit") {
+            requestQuit()
+        }
+        guard words.contains("begin"), let subjectNumber, let plan else {
+            return
+        }
+
+        resultFileWriter.beginExperiment(
+            protocolName: plan.protocolName,
+            subjectNumber: subjectNumber
+        )
+        hasExperimentBegun = true
+        speechListener.stop()
+        isListening = false
+        trialPhase = .targetCue
+        stimulusPresentationState.reset()
+        beginExperimentToken += 1
+    }
+
+    private func requestQuit() -> Never {
+        speechListener.stop()
+        isListening = false
+
+        // Apple intentionally doesn't provide a supported API for a visionOS
+        // app to terminate itself, and calling exit() is not considered good
+        // platform style or appropriate behavior for an App Store app.
+        //
+        // MobiWordFinderAVP is a privately deployed research application. Its
+        // spoken “Quit” command has an explicit experimental requirement to
+        // end the entire process, so we deliberately use exit() here instead
+        // of merely dismissing the app's windows and immersive space.
+        exit(EXIT_SUCCESS)
+    }
+
 }
 
 private struct InProgressTrialMeasurement {

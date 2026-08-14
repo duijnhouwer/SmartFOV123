@@ -14,13 +14,13 @@ For example, if the target is `536` and the grid contains:
 
 the target runs vertically through the middle column, so the participant says “seven, three, eight.” Target placement always leaves room for this three-cell crossing, which means target centers never occur on a grid edge. The generator accepts a grid only when both the target number and its perpendicular confirmation number occur exactly once across all horizontal and vertical three-digit sequences.
 
-Use **Start trial** in the launcher to grant microphone and speech-recognition access and begin the sequence. Each immersive trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app then accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically to the next scheduled trial, so the participant does not need to look at the launcher again unless they want to stop. Trials have no automatic time limit.
+Use **Start sequence** in the launcher to grant microphone and speech-recognition access and begin. Before trial 1, a binocular, head-locked visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes, no, or quit. Saying no, or anything other than yes or quit, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin” or “Quit.” Saying quit closes the immersive space and launcher. Saying begin opens the experimental compositor space and starts trial timing. Each trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically to the next scheduled trial, so the participant does not need to look at the launcher again unless they want to stop. Trials have no automatic time limit.
 
 Spoken forms are configured under `speech.aliases` in the master condition. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must resolve to at least one alias, and one alias cannot belong to multiple digits.
 
 ## Multi-trial configuration
 
-Schema version 5 uses snake_case property names and enum values. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands to a unique immutable identity such as `condition1`, even when seeds or all resolved parameters are identical.
+Schema version 5 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, and nonempty `instructions`. The name is copied into every result file; the other fields control participant-number collection and the pre-trial instruction card. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands to a unique immutable identity such as `condition1`, even when seeds or all resolved parameters are identical.
 
 `random_seed` accepts:
 
@@ -51,13 +51,20 @@ The app targets visionOS 2.0 or later. Speech recognition uses Apple's Speech fr
 The first completed trial in an app run creates a local-time-stamped file in the app's Documents container:
 
 ```text
-Documents/Results/result_20260814_130156.json
+Documents/Results/result_007_20260814_130156.json
 ```
 
 The file is always valid JSON. Its `trials` array grows after each completed trial:
 
 ```json
 {
+  "experiment": {
+    "application": "mobiWordFinderAVP",
+    "protocol_name": "example",
+    "subject_number": "007",
+    "start_date": "2026-08-14",
+    "start_time": "13:01:56-04:00"
+  },
   "trials": [
     {
       "name": "trial1",
@@ -87,7 +94,7 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
 }
 ```
 
-Each trial has its scheduled name and a complete `definition` containing the source condition name, concrete block and random seed, and every resolved parameter section. `inherits` and `repeats` are omitted because they have no meaning in a completed-trial record. `seeded_stimulus` records the generated target, its `leftright` or `topdown` orientation, the expected response, and the displayed grid as rows of integer digits. `results` records monotonic integer milliseconds since app launch for the trial start, digit reveal, and correct response, plus every transcript that successfully parsed as three digits and its detection time. Speech aliases are replaced with their configured digits before storage, and an entirely numeric result is collapsed without spaces (`Free 56` becomes `356` when `free` maps to `3`). Words without a configured mapping remain visible in the stored utterance. These timestamps intentionally provide practical event timing rather than millisecond measurement precision.
+The `experiment` block records the application, configured protocol, confirmed participant number, and local experiment-start date and time in ISO 8601-compatible forms. The participant number is a string so leading zeroes are preserved. Each trial has its scheduled name and a complete `definition` containing the source condition name, concrete block and random seed, and every resolved parameter section. `inherits` and `repeats` are omitted because they have no meaning in a completed-trial record. `seeded_stimulus` records the generated target, its `leftright` or `topdown` orientation, the expected response, and the displayed grid as rows of integer digits. `results` records monotonic integer milliseconds since app launch for the trial start, digit reveal, and correct response, plus every transcript that successfully parsed as three digits and its detection time. Speech aliases are replaced with their configured digits before storage, and an entirely numeric result is collapsed without spaces (`Free 56` becomes `356` when `free` maps to `3`). Words without a configured mapping remain visible in the stored utterance. These timestamps intentionally provide practical event timing rather than millisecond measurement precision.
 
 Scalar arrays, grid rows, and speech detections are formatted horizontally. No inheritance resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
 
