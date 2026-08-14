@@ -23,13 +23,6 @@ struct RGB: Decodable, Sendable {
     }
 }
 
-struct ExperimentConfiguration: Decodable, Sendable {
-    let schemaVersion: Int
-    let display: DisplayConfiguration
-    let speech: SpeechConfiguration
-    let stimulus: StimulusConfiguration
-}
-
 enum DisplayMode: String, Decodable, CaseIterable, Sendable {
     case videoPassthrough
     case opticalSeeThroughSimulation
@@ -38,22 +31,28 @@ enum DisplayMode: String, Decodable, CaseIterable, Sendable {
         let container = try decoder.singleValueContainer()
         let value = try container.decode(String.self)
         guard let mode = Self(rawValue: value) else {
-            let allowedValues = Self.allCases.map(\.rawValue).joined(separator: ", ")
+            let allowed = Self.allCases.map(\.rawValue).joined(separator: ", ")
             throw DecodingError.dataCorruptedError(
                 in: container,
-                debugDescription: "Invalid value ‘\(value)’; expected one of: \(allowedValues)."
+                debugDescription: "Invalid value ‘\(value)’; expected one of: \(allowed)."
             )
         }
         self = mode
     }
 }
 
-struct DisplayConfiguration: Decodable, Sendable {
+enum StimulusEye: String, Decodable, Sendable {
+    case left
+    case right
+    case both
+}
+
+struct DisplayConfiguration: Sendable {
     let mode: DisplayMode
     let peakOpacity: Float
 }
 
-struct SpeechConfiguration: Decodable, Sendable {
+struct SpeechConfiguration: Sendable {
     let digitAliases: [String: [String]]
 
     var aliasLookup: [String: Int] {
@@ -72,15 +71,8 @@ struct SpeechConfiguration: Decodable, Sendable {
     }
 }
 
-enum StimulusEye: String, Decodable, Sendable {
-    case left
-    case right
-    case both
-}
-
-struct StimulusConfiguration: Decodable, Sendable {
+struct StimulusConfiguration: Sendable {
     let eye: StimulusEye
-    let targetNumber: String
     let randomSeed: UInt64
 
     let digitHeightArcmin: Float
@@ -92,12 +84,8 @@ struct StimulusConfiguration: Decodable, Sendable {
     let digitBoxStrokeArcmin: Float
     let digitBoxFillRGB: RGB
     let digitBoxStrokeRGB: RGB
-
     let numberOfDigitBoxesHorizontal: Int
     let numberOfDigitBoxesVertical: Int
-
-    let digitGridHorizontalDeltaDegrees: Float
-    let digitGridVerticalDeltaDegrees: Float
 
     let fovWidthDegrees: Float
     let fovHeightDegrees: Float
@@ -106,8 +94,13 @@ struct StimulusConfiguration: Decodable, Sendable {
     let fovBackgroundRGB: RGB
     let fovBorderStrokeArcmin: Float
     let fovBorderRGB: RGB
-
     let distanceMeters: Float
+}
+
+struct ExperimentConfiguration: Sendable {
+    let display: DisplayConfiguration
+    let speech: SpeechConfiguration
+    let stimulus: StimulusConfiguration
 }
 
 struct NumberGrid: Sendable {
@@ -135,18 +128,41 @@ struct NumberGrid: Sendable {
 }
 
 struct Experiment: Sendable {
+    let trialNumber: Int
+    let conditionName: String
+    let blockNumber: Int
     let configuration: ExperimentConfiguration
     let grid: NumberGrid
+}
 
-    static func loadBundled() throws -> Experiment {
+struct ScheduledTrial: Sendable {
+    let trialNumber: Int
+    let conditionName: String
+    let blockNumber: Int
+    let configuration: ExperimentConfiguration
+
+    func instantiate() -> Experiment {
+        Experiment(
+            trialNumber: trialNumber,
+            conditionName: conditionName,
+            blockNumber: blockNumber,
+            configuration: configuration,
+            grid: NumberGridGenerator.makeGrid(using: configuration.stimulus)
+        )
+    }
+}
+
+struct ExperimentPlan: Sendable {
+    let trials: [ScheduledTrial]
+
+    static func loadBundled() throws -> ExperimentPlan {
         guard let url = Bundle.main.url(forResource: "experiment", withExtension: "json") else {
             throw ExperimentError.missingConfiguration
         }
-
         return try load(from: url)
     }
 
-    static func load(from url: URL) throws -> Experiment {
+    static func load(from url: URL) throws -> ExperimentPlan {
         let data: Data
         do {
             data = try Data(contentsOf: url)
@@ -154,43 +170,42 @@ struct Experiment: Sendable {
             throw ExperimentError.unreadableConfiguration(error)
         }
 
-        let configuration: ExperimentConfiguration
         do {
-            configuration = try JSONDecoder().decode(ExperimentConfiguration.self, from: data)
+            try JSONShapeValidator.validate(data)
+        } catch let error as ExperimentError {
+            throw error
+        } catch {
+            throw ExperimentError.invalidConfiguration(error.localizedDescription)
+        }
+
+        let file: ExperimentFile
+        do {
+            file = try JSONDecoder().decode(ExperimentFile.self, from: data)
         } catch let error as DecodingError {
             throw ExperimentError.invalidConfiguration(describe(error))
         } catch {
             throw ExperimentError.invalidConfiguration(error.localizedDescription)
         }
 
-        try configuration.validate()
-        return Experiment(
-            configuration: configuration,
-            grid: try NumberGridGenerator.makeGrid(using: configuration.stimulus)
-        )
+        return try ConditionResolver.makePlan(from: file)
     }
 
     private static func describe(_ error: DecodingError) -> String {
         let context: DecodingError.Context
         let path: [CodingKey]
         switch error {
-        case .typeMismatch(_, let errorContext),
-             .valueNotFound(_, let errorContext),
-             .dataCorrupted(let errorContext):
-            context = errorContext
-            path = errorContext.codingPath
-        case .keyNotFound(let key, let errorContext):
-            context = errorContext
-            path = errorContext.codingPath + [key]
+        case .typeMismatch(_, let value), .valueNotFound(_, let value), .dataCorrupted(let value):
+            context = value
+            path = value.codingPath
+        case .keyNotFound(let key, let value):
+            context = value
+            path = value.codingPath + [key]
         @unknown default:
             return error.localizedDescription
         }
 
         let jsonPath = path.reduce("$") { result, key in
-            if let index = key.intValue {
-                return "\(result)[\(index)]"
-            }
-            return "\(result).\(key.stringValue)"
+            key.intValue.map { "\(result)[\($0)]" } ?? "\(result).\(key.stringValue)"
         }
         return "\(jsonPath): \(context.debugDescription)"
     }
@@ -200,7 +215,6 @@ enum ExperimentError: LocalizedError {
     case missingConfiguration
     case unreadableConfiguration(Error)
     case invalidConfiguration(String)
-    case gridGenerationFailed
 
     var errorDescription: String? {
         switch self {
@@ -210,137 +224,702 @@ enum ExperimentError: LocalizedError {
             return "experiment.json couldn't be read: \(error.localizedDescription)"
         case .invalidConfiguration(let message):
             return "experiment.json is invalid: \(message)"
-        case .gridGenerationFailed:
-            return "A valid NumberFinder grid couldn't be generated from the configured seed."
         }
     }
 }
 
-private extension ExperimentConfiguration {
-    func validate() throws {
-        guard schemaVersion == 3 else {
-            throw ExperimentError.invalidConfiguration(
-                "schemaVersion \(schemaVersion) is unsupported; this app requires version 3."
-            )
-        }
+private struct ExperimentFile: Decodable {
+    let schemaVersion: Int
+    let conditions: [ConditionDefinition]
+}
 
-        guard display.peakOpacity.isFinite,
-              (0...1).contains(display.peakOpacity) else {
-            throw ExperimentError.invalidConfiguration(
-                "display.peakOpacity must be a finite value between 0.0 and 1.0."
-            )
-        }
+private enum InheritedField<Value> {
+    case inherited
+    case null
+    case value(Value)
+}
 
-        let requiredDigitKeys = Set((0...9).map(String.init))
-        guard Set(speech.digitAliases.keys) == requiredDigitKeys else {
-            throw ExperimentError.invalidConfiguration(
-                "speech.digitAliases must contain exactly the keys 0 through 9."
-            )
-        }
-        var aliasOwners: [String: String] = [:]
-        for digit in requiredDigitKeys {
-            guard let aliases = speech.digitAliases[digit], !aliases.isEmpty else {
-                throw ExperimentError.invalidConfiguration(
-                    "speech.digitAliases.\(digit) must contain at least one spoken form."
+private enum RandomSeedSpecification: Equatable {
+    case shuffle
+    case fixed(UInt64)
+    case list([UInt64])
+}
+
+extension RandomSeedSpecification: Decodable {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(UInt64.self) {
+            self = .fixed(value)
+        } else if let values = try? container.decode([UInt64].self) {
+            self = .list(values)
+        } else {
+            let keyword = try container.decode(String.self)
+            guard keyword == "shuffle" else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Expected an unsigned integer, an integer array, or the string ‘shuffle’."
                 )
             }
+            self = .shuffle
+        }
+    }
+}
+
+private struct DigitPatch: Decodable {
+    let heightDegrees: Float?
+    let fontName: String?
+    let rgb: RGB?
+}
+
+private struct BoxPatch: Decodable {
+    let widthDegrees: Float?
+    let heightDegrees: Float?
+    let strokeDegrees: Float?
+    let fillRGB: RGB?
+    let strokeRGB: RGB?
+    let numberHorizontal: Int?
+    let numberVertical: Int?
+}
+
+private struct FOVPatch: Decodable {
+    let eye: StimulusEye?
+    let mode: DisplayMode?
+    let peakOpacity: Float?
+    let widthDegrees: Float?
+    let heightDegrees: Float?
+    let horizontalOffsetDegrees: Float?
+    let verticalOffsetDegrees: Float?
+    let backgroundRGB: RGB?
+    let borderStrokeArcmin: Float?
+    let borderRGB: RGB?
+    let distanceMeters: Float?
+}
+
+private struct SpeechPatch: Decodable {
+    let aliases: [String: [String]]?
+}
+
+private struct ConditionDefinition: Decodable {
+    let name: String
+    let inherits: InheritedField<String>
+    let blockNumber: InheritedField<Int>
+    let repeats: InheritedField<Int>
+    let randomSeed: InheritedField<RandomSeedSpecification>
+    let digits: DigitPatch?
+    let boxes: BoxPatch?
+    let fov: FOVPatch?
+    let speech: SpeechPatch?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, inherits, repeats, randomSeed
+        case blockNumber = "blockNr"
+        case digits, boxes, fov, speech
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        inherits = try Self.decodeField(String.self, key: .inherits, from: container)
+        blockNumber = try Self.decodeField(Int.self, key: .blockNumber, from: container)
+        repeats = try Self.decodeField(Int.self, key: .repeats, from: container)
+        randomSeed = try Self.decodeField(
+            RandomSeedSpecification.self,
+            key: .randomSeed,
+            from: container
+        )
+        digits = try container.decodeIfPresent(DigitPatch.self, forKey: .digits)
+        boxes = try container.decodeIfPresent(BoxPatch.self, forKey: .boxes)
+        fov = try container.decodeIfPresent(FOVPatch.self, forKey: .fov)
+        speech = try container.decodeIfPresent(SpeechPatch.self, forKey: .speech)
+    }
+
+    private static func decodeField<T: Decodable>(
+        _ type: T.Type,
+        key: CodingKeys,
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> InheritedField<T> {
+        guard container.contains(key) else { return .inherited }
+        guard try !container.decodeNil(forKey: key) else { return .null }
+        return .value(try container.decode(type, forKey: key))
+    }
+}
+
+private struct ResolvedConditionPatch {
+    var blockNumber: Int?
+    var repeats: Int?
+    var randomSeed: RandomSeedSpecification?
+    var digits = ResolvedDigits()
+    var boxes = ResolvedBoxes()
+    var fov = ResolvedFOV()
+    var aliases: [String: [String]] = [:]
+
+    mutating func apply(_ definition: ConditionDefinition) {
+        blockNumber = definition.blockNumber.applying(to: blockNumber)
+        repeats = definition.repeats.applying(to: repeats)
+        randomSeed = definition.randomSeed.applying(to: randomSeed)
+
+        if let patch = definition.digits {
+            digits.heightDegrees = patch.heightDegrees ?? digits.heightDegrees
+            digits.fontName = patch.fontName ?? digits.fontName
+            digits.rgb = patch.rgb ?? digits.rgb
+        }
+        if let patch = definition.boxes {
+            boxes.widthDegrees = patch.widthDegrees ?? boxes.widthDegrees
+            boxes.heightDegrees = patch.heightDegrees ?? boxes.heightDegrees
+            boxes.strokeDegrees = patch.strokeDegrees ?? boxes.strokeDegrees
+            boxes.fillRGB = patch.fillRGB ?? boxes.fillRGB
+            boxes.strokeRGB = patch.strokeRGB ?? boxes.strokeRGB
+            boxes.numberHorizontal = patch.numberHorizontal ?? boxes.numberHorizontal
+            boxes.numberVertical = patch.numberVertical ?? boxes.numberVertical
+        }
+        if let patch = definition.fov {
+            fov.eye = patch.eye ?? fov.eye
+            fov.mode = patch.mode ?? fov.mode
+            fov.peakOpacity = patch.peakOpacity ?? fov.peakOpacity
+            fov.widthDegrees = patch.widthDegrees ?? fov.widthDegrees
+            fov.heightDegrees = patch.heightDegrees ?? fov.heightDegrees
+            fov.horizontalOffsetDegrees = patch.horizontalOffsetDegrees ?? fov.horizontalOffsetDegrees
+            fov.verticalOffsetDegrees = patch.verticalOffsetDegrees ?? fov.verticalOffsetDegrees
+            fov.backgroundRGB = patch.backgroundRGB ?? fov.backgroundRGB
+            fov.borderStrokeArcmin = patch.borderStrokeArcmin ?? fov.borderStrokeArcmin
+            fov.borderRGB = patch.borderRGB ?? fov.borderRGB
+            fov.distanceMeters = patch.distanceMeters ?? fov.distanceMeters
+        }
+        if let patch = definition.speech?.aliases {
+            aliases.merge(patch) { _, child in child }
+        }
+    }
+}
+
+private struct ResolvedDigits {
+    var heightDegrees: Float?
+    var fontName: String?
+    var rgb: RGB?
+}
+
+private struct ResolvedBoxes {
+    var widthDegrees: Float?
+    var heightDegrees: Float?
+    var strokeDegrees: Float?
+    var fillRGB: RGB?
+    var strokeRGB: RGB?
+    var numberHorizontal: Int?
+    var numberVertical: Int?
+}
+
+private struct ResolvedFOV {
+    var eye: StimulusEye?
+    var mode: DisplayMode?
+    var peakOpacity: Float?
+    var widthDegrees: Float?
+    var heightDegrees: Float?
+    var horizontalOffsetDegrees: Float?
+    var verticalOffsetDegrees: Float?
+    var backgroundRGB: RGB?
+    var borderStrokeArcmin: Float?
+    var borderRGB: RGB?
+    var distanceMeters: Float?
+}
+
+private extension InheritedField {
+    func applying(to inheritedValue: Value?) -> Value? {
+        switch self {
+        case .inherited: inheritedValue
+        case .null: nil
+        case .value(let value): value
+        }
+    }
+}
+
+private struct ExpandedCondition {
+    let name: String
+    let blockNumber: Int
+    let seed: UInt64
+    let patch: ResolvedConditionPatch
+}
+
+private enum ConditionResolver {
+    static let generatedName = "__condition_nr__"
+    static let maximumTrialCount = 10_000
+
+    static func makePlan(from file: ExperimentFile) throws -> ExperimentPlan {
+        guard file.schemaVersion == 4 else {
+            throw ExperimentError.invalidConfiguration(
+                "schemaVersion \(file.schemaVersion) is unsupported; this app requires version 4."
+            )
+        }
+        guard !file.conditions.isEmpty else {
+            throw ExperimentError.invalidConfiguration("conditions must contain at least the main condition.")
+        }
+
+        try validateDefinitionNames(file.conditions)
+        try validateMain(file.conditions[0])
+
+        let namedDefinitions = Dictionary(
+            uniqueKeysWithValues: file.conditions
+                .filter { $0.name != generatedName }
+                .map { ($0.name, $0) }
+        )
+        var cache: [String: ResolvedConditionPatch] = [:]
+        var expanded: [ExpandedCondition] = []
+
+        for definition in file.conditions {
+            let patch = try resolve(
+                definition,
+                namedDefinitions: namedDefinitions,
+                cache: &cache,
+                path: []
+            )
+            try validateResolved(patch, definitionName: definition.name)
+
+            let repeats = patch.repeats!
+            guard repeats >= 0 else {
+                throw invalid(definition.name, "repeats must be zero or greater.")
+            }
+            guard repeats <= maximumTrialCount else {
+                throw invalid(definition.name, "repeats may not exceed \(maximumTrialCount).")
+            }
+            if definition.name == generatedName, repeats == 0 {
+                throw invalid(definition.name, "is a generated condition definition and therefore requires repeats greater than zero.")
+            }
+            guard repeats > 0 else { continue }
+            guard let blockNumber = patch.blockNumber, blockNumber > 0 else {
+                throw invalid(definition.name, "a condition with repeats greater than zero requires blockNr >= 1.")
+            }
+            guard let seedSpecification = patch.randomSeed else {
+                throw invalid(definition.name, "a condition with repeats greater than zero requires randomSeed.")
+            }
+            if definition.name != generatedName, repeats > 1 {
+                throw invalid(
+                    definition.name,
+                    "a literal condition name may only be instantiated once; use \(generatedName) when repeats is greater than one."
+                )
+            }
+
+            let seeds = try expandSeeds(
+                seedSpecification,
+                repeats: repeats,
+                definitionName: definition.name
+            )
+            for seed in seeds {
+                guard expanded.count < maximumTrialCount else {
+                    throw ExperimentError.invalidConfiguration(
+                        "The expanded experiment may contain at most \(maximumTrialCount) trials."
+                    )
+                }
+                let conditionName = definition.name == generatedName
+                    ? "condition\(expanded.count + 1)"
+                    : definition.name
+                expanded.append(
+                    .init(
+                        name: conditionName,
+                        blockNumber: blockNumber,
+                        seed: seed,
+                        patch: patch
+                    )
+                )
+            }
+        }
+
+        guard !expanded.isEmpty else {
+            throw ExperimentError.invalidConfiguration(
+                "At least one condition must have repeats greater than zero."
+            )
+        }
+        guard Set(expanded.map(\.name)).count == expanded.count else {
+            throw ExperimentError.invalidConfiguration(
+                "Expanded condition names must be unique."
+            )
+        }
+
+        try validateBlocks(expanded.map(\.blockNumber))
+        let ordered = randomizedWithinBlocks(expanded)
+        let trials = try ordered.enumerated().map { offset, condition in
+            let configuration = try makeConfiguration(from: condition)
+            return ScheduledTrial(
+                trialNumber: offset + 1,
+                conditionName: condition.name,
+                blockNumber: condition.blockNumber,
+                configuration: configuration
+            )
+        }
+        return ExperimentPlan(trials: trials)
+    }
+
+    private static func validateDefinitionNames(_ definitions: [ConditionDefinition]) throws {
+        var literalNames = Set<String>()
+        for (index, definition) in definitions.enumerated() {
+            let name = definition.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name == definition.name else {
+                throw ExperimentError.invalidConfiguration(
+                    "conditions[\(index)].name must be nonempty and have no leading or trailing whitespace."
+                )
+            }
+            if name.hasPrefix("__"), name != generatedName {
+                throw ExperimentError.invalidConfiguration(
+                    "conditions[\(index)].name ‘\(name)’ is reserved; the only supported reserved name is \(generatedName)."
+                )
+            }
+            guard name == generatedName || literalNames.insert(name).inserted else {
+                throw ExperimentError.invalidConfiguration("Condition name ‘\(name)’ is defined more than once.")
+            }
+            guard definition.inherits.isSpecified else {
+                throw invalid(name, "inherits must be explicitly present.")
+            }
+        }
+    }
+
+    private static func validateMain(_ main: ConditionDefinition) throws {
+        guard main.name == "main" else {
+            throw ExperimentError.invalidConfiguration("The first condition must be named ‘main’.")
+        }
+        guard main.inherits.isNull else {
+            throw invalid("main", "inherits must be null.")
+        }
+        guard main.blockNumber.isNull else {
+            throw invalid("main", "blockNr must be explicitly null.")
+        }
+        guard case .value(0) = main.repeats else {
+            throw invalid("main", "repeats must be explicitly set to 0.")
+        }
+        guard main.randomSeed.isNull else {
+            throw invalid("main", "randomSeed must be explicitly null.")
+        }
+    }
+
+    private static func resolve(
+        _ definition: ConditionDefinition,
+        namedDefinitions: [String: ConditionDefinition],
+        cache: inout [String: ResolvedConditionPatch],
+        path: [String]
+    ) throws -> ResolvedConditionPatch {
+        if definition.name != generatedName, let cached = cache[definition.name] {
+            return cached
+        }
+        guard !path.contains(definition.name) else {
+            throw invalid(definition.name, "inheritance cycle: \((path + [definition.name]).joined(separator: " → ")).")
+        }
+
+        var result = ResolvedConditionPatch()
+        switch definition.inherits {
+        case .inherited:
+            throw invalid(definition.name, "inherits must be explicitly present.")
+        case .null:
+            guard definition.name == "main" else {
+                throw invalid(definition.name, "only main may inherit null.")
+            }
+        case .value(let parentName):
+            guard parentName != generatedName else {
+                throw invalid(definition.name, "cannot inherit from the generated name \(generatedName).")
+            }
+            guard let parent = namedDefinitions[parentName] else {
+                throw invalid(definition.name, "inherits unknown condition ‘\(parentName)’.")
+            }
+            result = try resolve(
+                parent,
+                namedDefinitions: namedDefinitions,
+                cache: &cache,
+                path: path + [definition.name]
+            )
+        }
+        result.apply(definition)
+        if definition.name != generatedName {
+            cache[definition.name] = result
+        }
+        return result
+    }
+
+    private static func validateResolved(
+        _ patch: ResolvedConditionPatch,
+        definitionName: String
+    ) throws {
+        func missing(_ name: String) throws -> Never {
+            throw invalid(definitionName, "does not resolve parameter \(name); main must define every parameter.")
+        }
+        guard patch.repeats != nil else { try missing("repeats") }
+        guard let digitHeight = patch.digits.heightDegrees else { try missing("digits.heightDegrees") }
+        guard let fontName = patch.digits.fontName else { try missing("digits.fontName") }
+        guard patch.digits.rgb != nil else { try missing("digits.rgb") }
+        guard let boxWidth = patch.boxes.widthDegrees else { try missing("boxes.widthDegrees") }
+        guard let boxHeight = patch.boxes.heightDegrees else { try missing("boxes.heightDegrees") }
+        guard let boxStroke = patch.boxes.strokeDegrees else { try missing("boxes.strokeDegrees") }
+        guard patch.boxes.fillRGB != nil else { try missing("boxes.fillRGB") }
+        guard patch.boxes.strokeRGB != nil else { try missing("boxes.strokeRGB") }
+        guard let columns = patch.boxes.numberHorizontal else { try missing("boxes.numberHorizontal") }
+        guard let rows = patch.boxes.numberVertical else { try missing("boxes.numberVertical") }
+        guard patch.fov.eye != nil else { try missing("fov.eye") }
+        guard patch.fov.mode != nil else { try missing("fov.mode") }
+        guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peakOpacity") }
+        guard let fovWidth = patch.fov.widthDegrees else { try missing("fov.widthDegrees") }
+        guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.heightDegrees") }
+        guard let horizontalOffset = patch.fov.horizontalOffsetDegrees else { try missing("fov.horizontalOffsetDegrees") }
+        guard let verticalOffset = patch.fov.verticalOffsetDegrees else { try missing("fov.verticalOffsetDegrees") }
+        guard patch.fov.backgroundRGB != nil else { try missing("fov.backgroundRGB") }
+        guard let borderStroke = patch.fov.borderStrokeArcmin else { try missing("fov.borderStrokeArcmin") }
+        guard patch.fov.borderRGB != nil else { try missing("fov.borderRGB") }
+        guard let distance = patch.fov.distanceMeters else { try missing("fov.distanceMeters") }
+
+        let requiredDigitKeys = Set((0...9).map(String.init))
+        guard Set(patch.aliases.keys) == requiredDigitKeys else {
+            throw invalid(definitionName, "speech.aliases must resolve exactly the keys 0 through 9.")
+        }
+        var aliasOwners: [String: String] = [:]
+        for digit in requiredDigitKeys.sorted() {
+            guard let aliases = patch.aliases[digit], !aliases.isEmpty else {
+                throw invalid(definitionName, "speech.aliases.\(digit) must contain at least one spoken form.")
+            }
+            var aliasesForDigit = Set<String>()
             for alias in aliases {
                 let normalized = SpeechConfiguration.normalize(alias)
                 guard !normalized.isEmpty,
                       normalized.unicodeScalars.allSatisfy(CharacterSet.letters.contains) else {
-                    throw ExperimentError.invalidConfiguration(
-                        "speech.digitAliases.\(digit) contains ‘\(alias)’; aliases must be single words containing letters only."
+                    throw invalid(
+                        definitionName,
+                        "speech.aliases.\(digit) contains ‘\(alias)’; aliases must be single words containing letters only."
                     )
                 }
-                if let existingDigit = aliasOwners[normalized], existingDigit != digit {
-                    throw ExperimentError.invalidConfiguration(
-                        "The speech alias ‘\(normalized)’ is assigned to both \(existingDigit) and \(digit)."
-                    )
+                guard aliasesForDigit.insert(normalized).inserted else {
+                    throw invalid(definitionName, "speech.aliases.\(digit) contains duplicate alias ‘\(normalized)’.")
+                }
+                if let existing = aliasOwners[normalized], existing != digit {
+                    throw invalid(definitionName, "speech alias ‘\(normalized)’ belongs to both \(existing) and \(digit).")
                 }
                 aliasOwners[normalized] = digit
             }
         }
 
-        let config = stimulus
-        let number = config.targetNumber
-        guard number.count == 3,
-              number.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }) else {
-            throw ExperimentError.invalidConfiguration("targetNumber must contain exactly three digits (0–9).")
+        let positive: [(String, Float)] = [
+            ("digits.heightDegrees", digitHeight),
+            ("boxes.widthDegrees", boxWidth),
+            ("boxes.heightDegrees", boxHeight),
+            ("fov.widthDegrees", fovWidth),
+            ("fov.heightDegrees", fovHeight),
+            ("fov.distanceMeters", distance)
+        ]
+        for (name, value) in positive where !value.isFinite || value <= 0 {
+            throw invalid(definitionName, "\(name) must be finite and greater than zero.")
         }
-        guard config.numberOfDigitBoxesHorizontal >= 3,
-              config.numberOfDigitBoxesVertical >= 3 else {
+        let nonnegative: [(String, Float)] = [
+            ("boxes.strokeDegrees", boxStroke),
+            ("fov.borderStrokeArcmin", borderStroke)
+        ]
+        for (name, value) in nonnegative where !value.isFinite || value < 0 {
+            throw invalid(definitionName, "\(name) must be finite and zero or greater.")
+        }
+        guard horizontalOffset.isFinite, verticalOffset.isFinite else {
+            throw invalid(definitionName, "FOV offsets must be finite.")
+        }
+        guard peakOpacity.isFinite, (0...1).contains(peakOpacity) else {
+            throw invalid(definitionName, "fov.peakOpacity must be between 0 and 1.")
+        }
+        guard columns >= 3, rows >= 3 else {
+            throw invalid(definitionName, "the box grid must be at least 3 × 3.")
+        }
+        guard columns <= 254, rows <= 254 else {
+            throw invalid(definitionName, "each box-grid dimension may be at most 254.")
+        }
+        guard boxStroke * 2 < min(boxWidth, boxHeight) else {
+            throw invalid(definitionName, "boxes.strokeDegrees is too large for the boxes.")
+        }
+        guard borderStroke / 60 * 2 < min(fovWidth, fovHeight) else {
+            throw invalid(definitionName, "fov.borderStrokeArcmin is too large for the FOV.")
+        }
+        guard boxWidth * Float(columns) <= fovWidth,
+              boxHeight * Float(rows) <= fovHeight else {
+            throw invalid(definitionName, "the centered box grid does not fit inside the FOV.")
+        }
+        guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw invalid(definitionName, "digits.fontName must not be empty.")
+        }
+    }
+
+    private static func expandSeeds(
+        _ specification: RandomSeedSpecification,
+        repeats: Int,
+        definitionName: String
+    ) throws -> [UInt64] {
+        switch specification {
+        case .shuffle:
+            var generator = SystemRandomNumberGenerator()
+            return (0..<repeats).map { _ in UInt64.random(in: .min ... .max, using: &generator) }
+        case .fixed(let seed):
+            return [UInt64](repeating: seed, count: repeats)
+        case .list(let seeds):
+            guard seeds.count == repeats else {
+                throw invalid(
+                    definitionName,
+                    "randomSeed contains \(seeds.count) values but repeats is \(repeats)."
+                )
+            }
+            return seeds
+        }
+    }
+
+    private static func validateBlocks(_ blocks: [Int]) throws {
+        let uniqueBlocks = Set(blocks)
+        guard let maximum = uniqueBlocks.max(),
+              uniqueBlocks == Set(1...maximum) else {
+            let actual = uniqueBlocks.sorted().map(String.init).joined(separator: ", ")
             throw ExperimentError.invalidConfiguration(
-                "The digit grid must be at least 3 × 3 so every target can have a three-digit perpendicular crossing."
+                "Instantiated block numbers must start at 1 and be consecutive without gaps; found [\(actual)]."
             )
         }
-        guard config.numberOfDigitBoxesHorizontal <= 254,
-              config.numberOfDigitBoxesVertical <= 254 else {
-            throw ExperimentError.invalidConfiguration("Each digit-grid dimension may be at most 254.")
-        }
-        guard number.count <= config.numberOfDigitBoxesHorizontal
-                || number.count <= config.numberOfDigitBoxesVertical else {
-            throw ExperimentError.invalidConfiguration("targetNumber does not fit horizontally or vertically in the grid.")
-        }
+    }
 
-        let positiveValues: [(String, Float)] = [
-            ("digitHeightArcmin", config.digitHeightArcmin),
-            ("digitBoxWidthArcmin", config.digitBoxWidthArcmin),
-            ("digitBoxHeightArcmin", config.digitBoxHeightArcmin),
-            ("fovWidthDegrees", config.fovWidthDegrees),
-            ("fovHeightDegrees", config.fovHeightDegrees),
-            ("distanceMeters", config.distanceMeters)
-        ]
-        for (name, value) in positiveValues where !value.isFinite || value <= 0 {
-            throw ExperimentError.invalidConfiguration("\(name) must be a finite value greater than zero.")
+    private static func randomizedWithinBlocks(
+        _ conditions: [ExpandedCondition]
+    ) -> [ExpandedCondition] {
+        let maximumBlock = conditions.map(\.blockNumber).max()!
+        var generator = SystemRandomNumberGenerator()
+        return (1...maximumBlock).flatMap { block in
+            conditions
+                .filter { $0.blockNumber == block }
+                .shuffled(using: &generator)
         }
+    }
 
-        let nonnegativeValues: [(String, Float)] = [
-            ("digitBoxStrokeArcmin", config.digitBoxStrokeArcmin),
-            ("fovBorderStrokeArcmin", config.fovBorderStrokeArcmin)
-        ]
-        for (name, value) in nonnegativeValues where !value.isFinite || value < 0 {
-            throw ExperimentError.invalidConfiguration("\(name) must be a finite value of zero or greater.")
+    private static func makeConfiguration(
+        from condition: ExpandedCondition
+    ) throws -> ExperimentConfiguration {
+        let patch = condition.patch
+        return ExperimentConfiguration(
+            display: .init(
+                mode: patch.fov.mode!,
+                peakOpacity: patch.fov.peakOpacity!
+            ),
+            speech: .init(digitAliases: patch.aliases),
+            stimulus: .init(
+                eye: patch.fov.eye!,
+                randomSeed: condition.seed,
+                digitHeightArcmin: patch.digits.heightDegrees! * 60,
+                digitFontName: patch.digits.fontName!,
+                digitRGB: patch.digits.rgb!,
+                digitBoxWidthArcmin: patch.boxes.widthDegrees! * 60,
+                digitBoxHeightArcmin: patch.boxes.heightDegrees! * 60,
+                digitBoxStrokeArcmin: patch.boxes.strokeDegrees! * 60,
+                digitBoxFillRGB: patch.boxes.fillRGB!,
+                digitBoxStrokeRGB: patch.boxes.strokeRGB!,
+                numberOfDigitBoxesHorizontal: patch.boxes.numberHorizontal!,
+                numberOfDigitBoxesVertical: patch.boxes.numberVertical!,
+                fovWidthDegrees: patch.fov.widthDegrees!,
+                fovHeightDegrees: patch.fov.heightDegrees!,
+                fovHorizontalOffsetDegrees: patch.fov.horizontalOffsetDegrees!,
+                fovVerticalOffsetDegrees: patch.fov.verticalOffsetDegrees!,
+                fovBackgroundRGB: patch.fov.backgroundRGB!,
+                fovBorderStrokeArcmin: patch.fov.borderStrokeArcmin!,
+                fovBorderRGB: patch.fov.borderRGB!,
+                distanceMeters: patch.fov.distanceMeters!
+            )
+        )
+    }
+
+    private static func invalid(_ condition: String, _ message: String) -> ExperimentError {
+        .invalidConfiguration("condition ‘\(condition)’ \(message)")
+    }
+}
+
+private extension InheritedField {
+    var isSpecified: Bool {
+        if case .inherited = self { return false }
+        return true
+    }
+
+    var isNull: Bool {
+        if case .null = self { return true }
+        return false
+    }
+}
+
+private enum JSONShapeValidator {
+    static func validate(_ data: Data) throws {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw ExperimentError.invalidConfiguration("Malformed JSON: \(error.localizedDescription)")
         }
-        let offsetValues: [(String, Float)] = [
-            ("digitGridHorizontalDeltaDegrees", config.digitGridHorizontalDeltaDegrees),
-            ("digitGridVerticalDeltaDegrees", config.digitGridVerticalDeltaDegrees),
-            ("fovHorizontalOffsetDegrees", config.fovHorizontalOffsetDegrees),
-            ("fovVerticalOffsetDegrees", config.fovVerticalOffsetDegrees)
-        ]
-        for (name, value) in offsetValues where !value.isFinite {
-            throw ExperimentError.invalidConfiguration("\(name) must be finite.")
+        let root = try dictionary(object, path: "$")
+        try keys(root, allowed: ["schemaVersion", "conditions"], path: "$")
+        guard let rawConditions = root["conditions"] as? [Any] else {
+            throw invalid("$.conditions", "must be an array.")
         }
-        guard config.digitBoxStrokeArcmin * 2 < min(
-            config.digitBoxWidthArcmin,
-            config.digitBoxHeightArcmin
-        ) else {
-            throw ExperimentError.invalidConfiguration("digitBoxStrokeArcmin is too large for the configured boxes.")
+        for (index, rawCondition) in rawConditions.enumerated() {
+            let path = "$.conditions[\(index)]"
+            let condition = try dictionary(rawCondition, path: path)
+            try keys(
+                condition,
+                allowed: ["name", "inherits", "blockNr", "repeats", "randomSeed", "digits", "boxes", "fov", "speech"],
+                path: path
+            )
+            try section(condition["digits"], path: "\(path).digits", allowed: ["heightDegrees", "fontName", "rgb"])
+            try section(
+                condition["boxes"],
+                path: "\(path).boxes",
+                allowed: ["widthDegrees", "heightDegrees", "strokeDegrees", "fillRGB", "strokeRGB", "numberHorizontal", "numberVertical"]
+            )
+            try section(
+                condition["fov"],
+                path: "\(path).fov",
+                allowed: ["eye", "mode", "peakOpacity", "widthDegrees", "heightDegrees", "horizontalOffsetDegrees", "verticalOffsetDegrees", "backgroundRGB", "borderStrokeArcmin", "borderRGB", "distanceMeters"]
+            )
+            if let rawSpeech = condition["speech"] {
+                let speech = try dictionary(rawSpeech, path: "\(path).speech")
+                try keys(speech, allowed: ["aliases"], path: "\(path).speech")
+                if let rawAliases = speech["aliases"] {
+                    let aliases = try dictionary(rawAliases, path: "\(path).speech.aliases")
+                    try keys(aliases, allowed: Set((0...9).map(String.init)), path: "\(path).speech.aliases")
+                }
+            }
         }
-        guard config.fovBorderStrokeArcmin * 2 < min(
-            config.fovWidthDegrees * 60,
-            config.fovHeightDegrees * 60
-        ) else {
-            throw ExperimentError.invalidConfiguration("fovBorderStrokeArcmin is too large for the configured FOV.")
+    }
+
+    private static func section(
+        _ rawValue: Any?,
+        path: String,
+        allowed: Set<String>
+    ) throws {
+        guard let rawValue else { return }
+        let value = try dictionary(rawValue, path: path)
+        try keys(value, allowed: allowed, path: path)
+    }
+
+    private static func dictionary(_ value: Any, path: String) throws -> [String: Any] {
+        guard let dictionary = value as? [String: Any] else {
+            throw invalid(path, "must be an object.")
         }
-        guard !config.digitFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ExperimentError.invalidConfiguration("digitFontName must not be empty.")
+        return dictionary
+    }
+
+    private static func keys(
+        _ dictionary: [String: Any],
+        allowed: Set<String>,
+        path: String
+    ) throws {
+        let unknown = Set(dictionary.keys).subtracting(allowed).sorted()
+        guard unknown.isEmpty else {
+            throw invalid(path, "contains unknown key(s): \(unknown.joined(separator: ", ")).")
         }
+    }
+
+    private static func invalid(_ path: String, _ message: String) -> ExperimentError {
+        .invalidConfiguration("\(path) \(message)")
     }
 }
 
 private enum NumberGridGenerator {
-    static func makeGrid(using config: StimulusConfiguration) throws -> NumberGrid {
+    static func makeGrid(using config: StimulusConfiguration) -> NumberGrid {
         let rows = config.numberOfDigitBoxesVertical
         let columns = config.numberOfDigitBoxesHorizontal
-        let number = Array(config.targetNumber.utf8)
+        var random = SplitMix64(seed: config.randomSeed)
+        let targetNumber = String(100 + random.nextInt(upperBound: 900))
+        let number = Array(targetNumber.utf8)
         let orientations = NumberGrid.Orientation.allThatFit(
             numberLength: number.count,
             rows: rows,
             columns: columns
         )
-        var random = SplitMix64(seed: config.randomSeed)
 
-        for _ in 0..<10_000 {
+        while true {
             var digits = (0..<(rows * columns)).map { _ in
                 UInt8(48 + random.nextInt(upperBound: 10))
             }
@@ -368,13 +947,9 @@ private enum NumberGridGenerator {
                 digits[row * columns + column] = digit
             }
 
-            let occurrences = findOccurrences(
-                of: number,
-                in: digits,
-                rows: rows,
-                columns: columns
-            )
-            guard occurrences == [placement] else { continue }
+            guard findOccurrences(of: number, in: digits, rows: rows, columns: columns) == [placement] else {
+                continue
+            }
 
             let middleOffset = number.count / 2
             let middleRow = placement.row + (orientation == .vertical ? middleOffset : 0)
@@ -386,46 +961,32 @@ private enum NumberGridGenerator {
                 verificationIndices = [middleRow - 1, middleRow, middleRow + 1].map {
                     $0 * columns + middleColumn
                 }
-                verificationPlacement = .init(
-                    row: middleRow - 1,
-                    column: middleColumn,
-                    orientation: .vertical
-                )
+                verificationPlacement = .init(row: middleRow - 1, column: middleColumn, orientation: .vertical)
             case .vertical:
                 verificationIndices = [middleColumn - 1, middleColumn, middleColumn + 1].map {
                     middleRow * columns + $0
                 }
-                verificationPlacement = .init(
-                    row: middleRow,
-                    column: middleColumn - 1,
-                    orientation: .horizontal
-                )
+                verificationPlacement = .init(row: middleRow, column: middleColumn - 1, orientation: .horizontal)
             }
             let verificationDigits = verificationIndices.map { digits[$0] }
-            let verificationOccurrences = findOccurrences(
+            guard findOccurrences(
                 of: verificationDigits,
                 in: digits,
                 rows: rows,
                 columns: columns
-            )
-            guard verificationOccurrences == [verificationPlacement] else { continue }
-
-            let verificationCode = String(
-                bytes: verificationDigits,
-                encoding: .ascii
-            )!
+            ) == [verificationPlacement] else {
+                continue
+            }
 
             return NumberGrid(
                 rows: rows,
                 columns: columns,
                 digits: digits,
-                targetNumber: config.targetNumber,
+                targetNumber: targetNumber,
                 targetPlacement: placement,
-                verificationCode: verificationCode
+                verificationCode: String(bytes: verificationDigits, encoding: .ascii)!
             )
         }
-
-        throw ExperimentError.gridGenerationFailed
     }
 
     private static func findOccurrences(
@@ -435,33 +996,24 @@ private enum NumberGridGenerator {
         columns: Int
     ) -> [NumberGrid.Placement] {
         var matches: [NumberGrid.Placement] = []
-
         if number.count <= columns {
             for row in 0..<rows {
                 for column in 0...(columns - number.count) {
-                    let isMatch = number.indices.allSatisfy { offset in
-                        digits[row * columns + column + offset] == number[offset]
-                    }
-                    if isMatch {
+                    if number.indices.allSatisfy({ digits[row * columns + column + $0] == number[$0] }) {
                         matches.append(.init(row: row, column: column, orientation: .horizontal))
                     }
                 }
             }
         }
-
         if number.count <= rows {
             for row in 0...(rows - number.count) {
                 for column in 0..<columns {
-                    let isMatch = number.indices.allSatisfy { offset in
-                        digits[(row + offset) * columns + column] == number[offset]
-                    }
-                    if isMatch {
+                    if number.indices.allSatisfy({ digits[(row + $0) * columns + column] == number[$0] }) {
                         matches.append(.init(row: row, column: column, orientation: .vertical))
                     }
                 }
             }
         }
-
         return matches
     }
 }

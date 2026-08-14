@@ -10,10 +10,13 @@ final class AppModel {
     }
 
     let immersiveSpaceID = "MobiWordFinderSpace"
-    let experiment: Experiment?
+    let plan: ExperimentPlan?
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
     private let speechListener = SpeechConfirmationListener()
     private var speechRestartTask: Task<Void, Never>?
+    private var instantiatedExperiment: Experiment?
+    private(set) var currentTrialIndex = 0
+    private(set) var completedTrialToken = 0
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
     var recognizedSpeech: String?
@@ -21,17 +24,49 @@ final class AppModel {
 
     init() {
         do {
-            experiment = try Experiment.loadBundled()
+            plan = try ExperimentPlan.loadBundled()
         } catch {
-            experiment = nil
+            plan = nil
             statusMessage = error.localizedDescription
             print("MobiWordFinder configuration error: \(error.localizedDescription)")
         }
     }
 
+    var experiment: Experiment? {
+        instantiatedExperiment
+    }
+
+    var trialCount: Int {
+        plan?.trials.count ?? 0
+    }
+
+    var hasCompletedExperiment: Bool {
+        plan != nil && currentTrialIndex >= trialCount
+    }
+
     var trialDescription: String {
-        guard let experiment else { return "No valid experiment is loaded." }
-        return "Find \(experiment.grid.targetNumber) in the \(experiment.grid.columns) × \(experiment.grid.rows) grid. Then read the three digits crossing its middle digit, one digit at a time."
+        if hasCompletedExperiment {
+            return "Experiment complete — all \(trialCount) trials have been confirmed."
+        }
+        guard let plan, plan.trials.indices.contains(currentTrialIndex) else {
+            return "No valid experiment is loaded."
+        }
+        let trial = plan.trials[currentTrialIndex]
+        if let experiment {
+            return "Trial \(trial.trialNumber) of \(trialCount), \(trial.conditionName): find \(experiment.grid.targetNumber) in the \(experiment.grid.columns) × \(experiment.grid.rows) grid. Then read the three digits crossing its middle digit, one digit at a time."
+        }
+        return "Trial \(trial.trialNumber) of \(trialCount), \(trial.conditionName). The target and grid will be generated when the trial starts."
+    }
+
+    @discardableResult
+    func prepareCurrentTrial() async -> Bool {
+        if instantiatedExperiment != nil { return true }
+        guard let plan, plan.trials.indices.contains(currentTrialIndex) else { return false }
+        let scheduledTrial = plan.trials[currentTrialIndex]
+        instantiatedExperiment = await Task.detached(priority: .userInitiated) {
+            scheduledTrial.instantiate()
+        }.value
+        return true
     }
 
     func requestSpeechAuthorization() async -> Bool {
@@ -90,10 +125,23 @@ final class AppModel {
         if candidate == experiment.grid.verificationCode {
             statusMessage = "Correct — heard \(candidate)."
             feedbackSoundPlayer.playCorrect()
+            completedTrialToken += 1
         } else {
             statusMessage = "Heard \(candidate), but that isn't the crossing sequence. Try again."
             feedbackSoundPlayer.playWrong()
             scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
+        }
+    }
+
+    func advanceAfterCompletedTrial() {
+        guard let plan, currentTrialIndex < plan.trials.count else { return }
+        currentTrialIndex += 1
+        instantiatedExperiment = nil
+        if hasCompletedExperiment {
+            statusMessage = "Experiment complete — all \(trialCount) trials finished."
+        } else if plan.trials.indices.contains(currentTrialIndex) {
+            let trial = plan.trials[currentTrialIndex]
+            statusMessage = "Ready for trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."
         }
     }
 

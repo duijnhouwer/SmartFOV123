@@ -1,52 +1,83 @@
 {
-  "schemaVersion": 3,
-  "display": {
-    "mode": "opticalSeeThroughSimulation",
-    "peakOpacity": 0.35
-  },
-  "speech": {
-    "digitAliases": {
-      "0": ["zero", "oh", "o"],
-      "1": ["one", "won"],
-      "2": ["two", "to", "too"],
-      "3": ["three", "free", "tree", "dree"],
-      "4": ["four", "for", "fore"],
-      "5": ["five"],
-      "6": ["six", "sicks"],
-      "7": ["seven"],
-      "8": ["eight", "ate"],
-      "9": ["nine"]
+  "schemaVersion": 4,
+  "conditions": [
+    {
+      "name": "main",
+      "inherits": null,
+      "blockNr": null,
+      "repeats": 0,
+      "randomSeed": null,
+      "digits": {
+        "heightDegrees": 1.4,
+        "fontName": "Arial",
+        "rgb": [0.2, 0.2, 0.2]
+      },
+      "boxes": {
+        "widthDegrees": 2.0,
+        "heightDegrees": 2.0,
+        "strokeDegrees": 0.1,
+        "fillRGB": [0.8, 0.8, 0.8],
+        "strokeRGB": [0.0, 0.0, 0.0],
+        "numberHorizontal": 8,
+        "numberVertical": 8
+      },
+      "fov": {
+        "eye": "right",
+        "mode": "opticalSeeThroughSimulation",
+        "peakOpacity": 0.35,
+        "widthDegrees": 21.21,
+        "heightDegrees": 21.21,
+        "horizontalOffsetDegrees": 0.0,
+        "verticalOffsetDegrees": 0.0,
+        "backgroundRGB": [1.0, 1.0, 1.0],
+        "borderStrokeArcmin": 5,
+        "borderRGB": [0.0, 0.0, 0.0],
+        "distanceMeters": 1.5
+      },
+      "speech": {
+        "aliases": {
+          "0": ["zero", "oh", "o"],
+          "1": ["one", "won"],
+          "2": ["two", "to", "too"],
+          "3": ["three", "free", "tree", "dree"],
+          "4": ["four", "for", "fore"],
+          "5": ["five"],
+          "6": ["six", "sicks"],
+          "7": ["seven"],
+          "8": ["eight", "ate"],
+          "9": ["nine"]
+        }
+      }
+    },
+    {
+      "name": "fov_30_right",
+      "inherits": "main",
+      "fov": {
+        "eye": "right",
+        "widthDegrees": 21.21,
+        "heightDegrees": 21.21
+      }
+    },
+    {
+      "name": "fov_30_both",
+      "inherits": "fov_30_right",
+      "fov": {
+        "eye": "both"
+      }
+    },
+    {
+      "name": "__condition_nr__",
+      "inherits": "fov_30_right",
+      "blockNr": 1,
+      "repeats": 10,
+      "randomSeed": "shuffle"
+    },
+    {
+      "name": "__condition_nr__",
+      "inherits": "fov_30_both",
+      "blockNr": 2,
+      "repeats": 10,
+      "randomSeed": "shuffle"
     }
-  },
-  "stimulus": {
-    "eye": "right",
-    "targetNumber": "536",
-    "randomSeed": 123,
-
-    "digitHeightArcmin": 90,
-    "digitFontName": "Arial",
-    "digitRGB": [0.2, 0.2, 0.2],
-
-    "digitBoxWidthArcmin": 120,
-    "digitBoxHeightArcmin": 120,
-    "digitBoxStrokeArcmin": 5,
-    "digitBoxFillRGB": [0.8, 0.8, 0.8],
-    "digitBoxStrokeRGB": [0.0, 0.0, 0.0],
-
-    "numberOfDigitBoxesHorizontal": 8,
-    "numberOfDigitBoxesVertical": 8,
-
-    "digitGridHorizontalDeltaDegrees": 0.0,
-    "digitGridVerticalDeltaDegrees": 0.0,
-
-    "fovWidthDegrees": 21.21,
-    "fovHeightDegrees": 21.21,
-    "fovHorizontalOffsetDegrees": 0.0,
-    "fovVerticalOffsetDegrees": 0.0,
-    "fovBackgroundRGB": [1.0, 1.0, 1.0],
-    "fovBorderStrokeArcmin": 5,
-    "fovBorderRGB": [0.0, 0.0, 0.0],
-
-    "distanceMeters": 1.5
-  }
+  ]
 }

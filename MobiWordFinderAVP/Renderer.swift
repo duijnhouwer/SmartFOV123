@@ -66,16 +66,7 @@ private struct StimulusGeometry {
                 distance: configuration.distanceMeters
             ) / 2
         )
-        gridCenterMeters = fovCenterMeters + SIMD2(
-            Self.offsetMeters(
-                degrees: configuration.digitGridHorizontalDeltaDegrees,
-                distance: configuration.distanceMeters
-            ),
-            Self.offsetMeters(
-                degrees: configuration.digitGridVerticalDeltaDegrees,
-                distance: configuration.distanceMeters
-            )
-        )
+        gridCenterMeters = fovCenterMeters
         digitHeightMeters = Self.sizeMeters(
             degrees: configuration.digitHeightArcmin / 60,
             distance: configuration.distanceMeters
@@ -150,10 +141,11 @@ actor Renderer {
     private var nextSignalValue: UInt64 = 1
     #endif
 
-    init(_ layerRenderer: LayerRenderer, appModel: AppModel) throws {
-        guard let experiment = appModel.experiment else {
-            throw RendererError.experimentMissing
-        }
+    init(
+        _ layerRenderer: LayerRenderer,
+        appModel: AppModel,
+        experiment: Experiment
+    ) throws {
         self.layerRenderer = layerRenderer
         self.appModel = appModel
         self.experiment = experiment
@@ -244,9 +236,17 @@ actor Renderer {
 
     @MainActor
     static func start(_ layerRenderer: LayerRenderer, appModel: AppModel) {
+        guard let experiment = appModel.experiment else {
+            appModel.statusMessage = RendererError.experimentMissing.localizedDescription
+            return
+        }
         Task(executorPreference: RenderTaskExecutor.shared) {
             do {
-                let renderer = try Renderer(layerRenderer, appModel: appModel)
+                let renderer = try Renderer(
+                    layerRenderer,
+                    appModel: appModel,
+                    experiment: experiment
+                )
                 try await renderer.startARSession()
                 await renderer.renderLoop()
             } catch {

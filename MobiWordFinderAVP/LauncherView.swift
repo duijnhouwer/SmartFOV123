@@ -4,7 +4,6 @@ struct LauncherView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
-    @State private var safetyStopTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 18) {
@@ -14,7 +13,7 @@ struct LauncherView: View {
             Text(appModel.trialDescription)
                 .multilineTextAlignment(.center)
 
-            Text("The grid is presented using the geometry in experiment.json. Speech recognition listens only during the trial. Keep this window open while testing; the trial stops automatically after 30 seconds.")
+            Text("The grid is presented using the geometry in experiment.json. Speech recognition listens only during the trial. Keep this window open while testing so you can stop the trial when needed.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -37,7 +36,11 @@ struct LauncherView: View {
             } label: {
                 Text(buttonTitle)
             }
-            .disabled(appModel.immersiveSpaceState == .inTransition || appModel.experiment == nil)
+            .disabled(
+                appModel.immersiveSpaceState == .inTransition
+                    || appModel.plan == nil
+                    || appModel.hasCompletedExperiment
+            )
 
             if let statusMessage = appModel.statusMessage {
                 Text(statusMessage)
@@ -48,10 +51,16 @@ struct LauncherView: View {
         }
         .padding(40)
         .onDisappear {
-            safetyStopTask?.cancel()
             Task { @MainActor in
                 guard appModel.immersiveSpaceState == .open else { return }
                 await stopTest(message: nil)
+            }
+        }
+        .onChange(of: appModel.completedTrialToken) { _, _ in
+            Task { @MainActor in
+                guard appModel.immersiveSpaceState == .open else { return }
+                await stopTest(message: nil)
+                appModel.advanceAfterCompletedTrial()
             }
         }
     }
@@ -81,8 +90,13 @@ struct LauncherView: View {
 
     @MainActor
     private func startTest() async {
-        safetyStopTask?.cancel()
         appModel.immersiveSpaceState = .inTransition
+        appModel.statusMessage = "Generating a valid trial grid…"
+        guard await appModel.prepareCurrentTrial() else {
+            appModel.immersiveSpaceState = .closed
+            appModel.statusMessage = "No scheduled trial is available."
+            return
+        }
         appModel.statusMessage = "Requesting microphone and speech-recognition access…"
 
         guard await appModel.requestSpeechAuthorization() else {
@@ -96,7 +110,6 @@ struct LauncherView: View {
         case .opened:
             appModel.immersiveSpaceState = .open
             await appModel.startSpeechConfirmation()
-            scheduleSafetyStop()
         case .userCancelled:
             appModel.immersiveSpaceState = .closed
             appModel.statusMessage = "The immersive-space request was cancelled."
@@ -111,8 +124,6 @@ struct LauncherView: View {
 
     @MainActor
     private func stopTest(message: String?) async {
-        safetyStopTask?.cancel()
-        safetyStopTask = nil
         appModel.stopSpeechConfirmation()
         appModel.immersiveSpaceState = .inTransition
         await dismissImmersiveSpace()
@@ -120,13 +131,4 @@ struct LauncherView: View {
         appModel.statusMessage = message
     }
 
-    @MainActor
-    private func scheduleSafetyStop() {
-        safetyStopTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
-            guard !Task.isCancelled,
-                  appModel.immersiveSpaceState == .open else { return }
-            await stopTest(message: "The test stopped automatically after 30 seconds.")
-        }
-    }
 }

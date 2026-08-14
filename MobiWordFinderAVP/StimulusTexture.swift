@@ -88,17 +88,9 @@ struct StimulusTexture {
             context.setFillColor(config.fovBackgroundRGB.cgColor)
             context.fill(fovRect)
 
-            let gridDeltaX = Self.offsetMeters(
-                degrees: config.digitGridHorizontalDeltaDegrees,
-                distance: config.distanceMeters
-            )
-            let gridDeltaY = Self.offsetMeters(
-                degrees: config.digitGridVerticalDeltaDegrees,
-                distance: config.distanceMeters
-            )
             let gridCenter = CGPoint(
-                x: CGFloat(sourceWidth) / 2 + CGFloat(gridDeltaX) * scaleX,
-                y: CGFloat(sourceHeight) / 2 + CGFloat(gridDeltaY) * scaleY
+                x: CGFloat(sourceWidth) / 2,
+                y: CGFloat(sourceHeight) / 2
             )
             let boxWidth = CGFloat(boxWidthMeters) * scaleX
             let boxHeight = CGFloat(boxHeightMeters) * scaleY

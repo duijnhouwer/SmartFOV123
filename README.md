@@ -2,7 +2,7 @@
 
 A configurable visionOS number-finding experiment rendered independently to either or both eyes over passthrough with Compositor Services and Metal.
 
-The current implementation loads `Config/experiment.json`, generates a deterministic digit grid, and presents it as a head-locked stimulus at the configured visual-field position and distance. The participant searches for the configured three-digit target number and confirms its location by speaking the perpendicular three-digit sequence that crosses the target's middle digit.
+The app loads the complete multi-trial plan from `Config/experiment.json` before the experiment starts. Conditions support recursive inheritance, repetitions, fixed or shuffled seeds, and ordered blocks whose trials are randomized internally. Each repetition expands into a uniquely named condition, and the first three-digit number drawn from its seeded random-number generator becomes the target. The participant confirms the target's location by speaking the perpendicular three-digit sequence that crosses its middle digit.
 
 For example, if the target is `536` and the grid contains:
 
@@ -14,9 +14,25 @@ For example, if the target is `536` and the grid contains:
 
 the target runs vertically through the middle column, so the participant says “seven, three, eight.” Target placement always leaves room for this three-cell crossing, which means target centers never occur on a grid edge. The generator accepts a grid only when both the target number and its perpendicular confirmation number occur exactly once across all horizontal and vertical three-digit sequences.
 
-Use **Start trial** in the launcher to grant microphone and speech-recognition access and open the mixed immersive space. The app listens only while the trial is active, shows the latest transcript, accepts digit-by-digit or normal-number transcriptions, and plays the bundled correct/wrong cue. The launcher stays open so you can stop the trial reliably; move it aside if it blocks the grid. Closing the launcher also dismisses the immersive space. As a final safety measure, the immersive trial stops automatically after 30 seconds.
+Use **Start trial** in the launcher to grant microphone and speech-recognition access and open the mixed immersive space. The app listens only while the trial is active, shows the latest transcript, accepts digit-by-digit or normal-number transcriptions, and plays the bundled correct/wrong cue. A correct response closes the current immersive trial and advances to the next scheduled trial. The launcher stays open so you can stop a trial reliably; move it aside if it blocks the grid. Trials have no automatic time limit.
 
-Spoken forms are configured under `speech.digitAliases` in `Config/experiment.json`. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`; aliases are loaded at launch, so changing the mapping does not require changing or recompiling Swift code. Every digit from `0` through `9` must be present, and one alias cannot belong to multiple digits.
+Spoken forms are configured under `speech.aliases` in the main condition. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must resolve to at least one alias, and one alias cannot belong to multiple digits.
+
+## Multi-trial configuration
+
+The first condition must be `main`, inherit `null`, set `blockNr` and `randomSeed` to `null`, set `repeats` to `0`, and define every parameter. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands to a unique immutable identity such as `condition1`, even when seeds or all resolved parameters are identical.
+
+`randomSeed` accepts:
+
+- `"shuffle"` for a fresh random seed per repetition.
+- One unsigned integer, reused for every repetition.
+- An unsigned-integer array whose length must equal `repeats`.
+
+Every instantiated condition requires `blockNr >= 1`. Used block numbers must begin at 1 and be consecutive without gaps. Blocks run in ascending order, and their trials are randomized within each block. Initial trial names (`trial1`, `trial2`, …) are assigned after scheduling and remain separate from condition identities so a future retry can create a new trial for an existing condition.
+
+The entire configuration and schedule are preflighted at app launch. Validation rejects malformed or unknown keys, incomplete main parameters, invalid or circular inheritance, illegal reserved names, duplicate expanded names, invalid repeats or seed arrays, nonconsecutive blocks, and invalid geometry, colors, or speech aliases. If preflight fails, **Start trial** remains disabled and the launcher reports the configuration error.
+
+Grid generation happens when each trial is about to run. The target is drawn first from that trial's seeded random-number generator. Candidate grids are then generated until both the target and its perpendicular response occur exactly once across all horizontal and vertical three-digit sequences. A rejected candidate advances the same deterministic random-number stream; it does not invalidate or abort the experiment.
 
 ## Run on Apple Vision Pro
 
@@ -30,10 +46,10 @@ The app targets visionOS 2.0 or later. Speech recognition uses Apple's Speech fr
 
 ## Display compositing
 
-`Config/experiment.json` selects one of two display models:
+Each resolved condition selects one of two display models in its `fov` section:
 
 ```json
-"display": {
+"fov": {
   "mode": "opticalSeeThroughSimulation",
   "peakOpacity": 0.35
 }
