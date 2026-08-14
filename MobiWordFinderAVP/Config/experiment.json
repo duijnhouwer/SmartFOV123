@@ -10,7 +10,8 @@
       "digits": {
         "height_degrees": 1.4,
         "font_name": "Arial",
-        "rgb": [0.2, 0.2, 0.2]
+        "rgb": [0.2, 0.2, 0.2],
+        "random_method": "flat_distribution"
       },
       "boxes": {
         "width_degrees": 2.0,

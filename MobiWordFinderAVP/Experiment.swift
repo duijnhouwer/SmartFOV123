@@ -47,6 +47,23 @@ enum StimulusEye: String, Decodable, Sendable {
     case both
 }
 
+enum DigitRandomMethod: String, Decodable, CaseIterable, Sendable {
+    case flatDistribution = "flat_distribution"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        guard let method = Self(rawValue: value) else {
+            let allowed = Self.allCases.map(\.rawValue).joined(separator: ", ")
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid value ‘\(value)’; expected one of: \(allowed)."
+            )
+        }
+        self = method
+    }
+}
+
 struct DisplayConfiguration: Sendable {
     let mode: DisplayMode
     let peakOpacity: Float
@@ -78,6 +95,7 @@ struct StimulusConfiguration: Sendable {
     let digitHeightArcmin: Float
     let digitFontName: String
     let digitRGB: RGB
+    let digitRandomMethod: DigitRandomMethod
 
     let digitBoxWidthArcmin: Float
     let digitBoxHeightArcmin: Float
@@ -274,11 +292,13 @@ private struct DigitPatch: Decodable {
     let heightDegrees: Float?
     let fontName: String?
     let rgb: RGB?
+    let randomMethod: DigitRandomMethod?
 
     private enum CodingKeys: String, CodingKey {
         case heightDegrees = "height_degrees"
         case fontName = "font_name"
         case rgb
+        case randomMethod = "random_method"
     }
 }
 
@@ -397,6 +417,7 @@ private struct ResolvedConditionPatch {
             digits.heightDegrees = patch.heightDegrees ?? digits.heightDegrees
             digits.fontName = patch.fontName ?? digits.fontName
             digits.rgb = patch.rgb ?? digits.rgb
+            digits.randomMethod = patch.randomMethod ?? digits.randomMethod
         }
         if let patch = definition.boxes {
             boxes.widthDegrees = patch.widthDegrees ?? boxes.widthDegrees
@@ -430,6 +451,7 @@ private struct ResolvedDigits {
     var heightDegrees: Float?
     var fontName: String?
     var rgb: RGB?
+    var randomMethod: DigitRandomMethod?
 }
 
 private struct ResolvedBoxes {
@@ -675,6 +697,7 @@ private enum ConditionResolver {
         guard let digitHeight = patch.digits.heightDegrees else { try missing("digits.height_degrees") }
         guard let fontName = patch.digits.fontName else { try missing("digits.font_name") }
         guard patch.digits.rgb != nil else { try missing("digits.rgb") }
+        guard patch.digits.randomMethod != nil else { try missing("digits.random_method") }
         guard let boxWidth = patch.boxes.widthDegrees else { try missing("boxes.width_degrees") }
         guard let boxHeight = patch.boxes.heightDegrees else { try missing("boxes.height_degrees") }
         guard let boxStroke = patch.boxes.strokeDegrees else { try missing("boxes.stroke_degrees") }
@@ -839,6 +862,7 @@ private enum ConditionResolver {
                 digitHeightArcmin: patch.digits.heightDegrees! * 60,
                 digitFontName: patch.digits.fontName!,
                 digitRGB: patch.digits.rgb!,
+                digitRandomMethod: patch.digits.randomMethod!,
                 digitBoxWidthArcmin: patch.boxes.widthDegrees! * 60,
                 digitBoxHeightArcmin: patch.boxes.heightDegrees! * 60,
                 digitBoxStrokeArcmin: patch.boxes.strokeDegrees! * 60,
@@ -896,7 +920,11 @@ private enum JSONShapeValidator {
                 allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "boxes", "fov", "speech"],
                 path: path
             )
-            try section(condition["digits"], path: "\(path).digits", allowed: ["height_degrees", "font_name", "rgb"])
+            try section(
+                condition["digits"],
+                path: "\(path).digits",
+                allowed: ["height_degrees", "font_name", "rgb", "random_method"]
+            )
             try section(
                 condition["boxes"],
                 path: "\(path).boxes",
@@ -956,18 +984,15 @@ private enum NumberGridGenerator {
         let rows = config.numberOfDigitBoxesVertical
         let columns = config.numberOfDigitBoxesHorizontal
         var random = SplitMix64(seed: config.randomSeed)
-        let targetNumber = String(100 + random.nextInt(upperBound: 900))
-        let number = Array(targetNumber.utf8)
-        let orientations = NumberGrid.Orientation.allThatFit(
-            numberLength: number.count,
-            rows: rows,
-            columns: columns
-        )
 
         while true {
-            var digits = (0..<(rows * columns)).map { _ in
-                UInt8(48 + random.nextInt(upperBound: 10))
-            }
+            let targetNumber = makeTargetNumber(using: &random)
+            let number = Array(targetNumber.utf8)
+            let orientations = NumberGrid.Orientation.allThatFit(
+                numberLength: number.count,
+                rows: rows,
+                columns: columns
+            )
             let orientation = orientations[random.nextInt(upperBound: orientations.count)]
             let placement: NumberGrid.Placement
 
@@ -986,10 +1011,30 @@ private enum NumberGridGenerator {
                 )
             }
 
+            var availableDigits = makeDigitPool(
+                count: rows * columns,
+                method: config.digitRandomMethod,
+                using: &random
+            )
+            for digit in number {
+                let poolIndex = availableDigits.firstIndex(of: digit)!
+                availableDigits.remove(at: poolIndex)
+            }
+            shuffle(&availableDigits, using: &random)
+
+            var digits = [UInt8](repeating: 0, count: rows * columns)
+            var targetIndices = Set<Int>()
             for (offset, digit) in number.enumerated() {
                 let row = placement.row + (orientation == .vertical ? offset : 0)
                 let column = placement.column + (orientation == .horizontal ? offset : 0)
-                digits[row * columns + column] = digit
+                let index = row * columns + column
+                digits[index] = digit
+                targetIndices.insert(index)
+            }
+            var availableIndex = 0
+            for index in digits.indices where !targetIndices.contains(index) {
+                digits[index] = availableDigits[availableIndex]
+                availableIndex += 1
             }
 
             guard findOccurrences(of: number, in: digits, rows: rows, columns: columns) == [placement] else {
@@ -1000,28 +1045,17 @@ private enum NumberGridGenerator {
             let middleRow = placement.row + (orientation == .vertical ? middleOffset : 0)
             let middleColumn = placement.column + (orientation == .horizontal ? middleOffset : 0)
             let verificationIndices: [Int]
-            let verificationPlacement: NumberGrid.Placement
             switch orientation {
             case .horizontal:
                 verificationIndices = [middleRow - 1, middleRow, middleRow + 1].map {
                     $0 * columns + middleColumn
                 }
-                verificationPlacement = .init(row: middleRow - 1, column: middleColumn, orientation: .vertical)
             case .vertical:
                 verificationIndices = [middleColumn - 1, middleColumn, middleColumn + 1].map {
                     middleRow * columns + $0
                 }
-                verificationPlacement = .init(row: middleRow, column: middleColumn - 1, orientation: .horizontal)
             }
             let verificationDigits = verificationIndices.map { digits[$0] }
-            guard findOccurrences(
-                of: verificationDigits,
-                in: digits,
-                rows: rows,
-                columns: columns
-            ) == [verificationPlacement] else {
-                continue
-            }
 
             return NumberGrid(
                 rows: rows,
@@ -1031,6 +1065,43 @@ private enum NumberGridGenerator {
                 targetPlacement: placement,
                 verificationCode: String(bytes: verificationDigits, encoding: .ascii)!
             )
+        }
+    }
+
+    private static func makeTargetNumber(using random: inout SplitMix64) -> String {
+        while true {
+            let value = 12 + random.nextInt(upperBound: 976)
+            let number = String(format: "%03d", value)
+            guard Set(number).count == 3 else { continue }
+            return number
+        }
+    }
+
+    private static func makeDigitPool(
+        count: Int,
+        method: DigitRandomMethod,
+        using random: inout SplitMix64
+    ) -> [UInt8] {
+        switch method {
+        case .flatDistribution:
+            let copiesPerDigit = count / 10
+            var digits = (0..<10).flatMap { digit in
+                [UInt8](repeating: UInt8(48 + digit), count: copiesPerDigit)
+            }
+            var remainderCandidates = (0..<10).map { UInt8(48 + $0) }
+            shuffle(&remainderCandidates, using: &random)
+            digits.append(contentsOf: remainderCandidates.prefix(count % 10))
+            return digits
+        }
+    }
+
+    private static func shuffle<Element>(
+        _ values: inout [Element],
+        using random: inout SplitMix64
+    ) {
+        guard values.count > 1 else { return }
+        for index in stride(from: values.count - 1, through: 1, by: -1) {
+            values.swapAt(index, random.nextInt(upperBound: index + 1))
         }
     }
 
