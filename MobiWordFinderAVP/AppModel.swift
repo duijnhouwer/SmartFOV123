@@ -11,6 +11,7 @@ final class AppModel {
 
     let immersiveSpaceID = "MobiWordFinderSpace"
     let experiment: Experiment?
+    private let selectionSoundPlayer = SelectionSoundPlayer()
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
 
@@ -40,8 +41,10 @@ final class AppModel {
         let letter = experiment.grid.letter(at: index)
         if index == experiment.grid.targetMiddleIndex {
             statusMessage = "Correct — selected \(letter) at row \(row + 1), column \(column + 1)."
+            selectionSoundPlayer.playCorrect()
         } else {
             statusMessage = "Selected \(letter) at row \(row + 1), column \(column + 1). Keep looking for \(experiment.grid.targetWord)."
+            selectionSoundPlayer.playWrong()
         }
     }
 }
