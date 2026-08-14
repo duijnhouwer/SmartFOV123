@@ -1,8 +1,22 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "display": {
     "mode": "opticalSeeThroughSimulation",
     "peakOpacity": 0.35
+  },
+  "speech": {
+    "digitAliases": {
+      "0": ["zero", "oh", "o"],
+      "1": ["one", "won"],
+      "2": ["two", "to", "too"],
+      "3": ["three", "free", "tree", "dree"],
+      "4": ["four", "for", "fore"],
+      "5": ["five"],
+      "6": ["six", "sicks"],
+      "7": ["seven"],
+      "8": ["eight", "ate"],
+      "9": ["nine"]
+    }
   },
   "stimulus": {
     "eye": "right",

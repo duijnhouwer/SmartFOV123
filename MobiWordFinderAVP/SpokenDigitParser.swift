@@ -1,19 +1,6 @@
 import Foundation
 
 enum SpokenDigitParser {
-    private static let singleDigits: [String: Int] = [
-        "zero": 0, "oh": 0, "o": 0,
-        "one": 1, "won": 1,
-        "two": 2, "to": 2, "too": 2,
-        "three": 3,
-        "four": 4, "for": 4, "fore": 4,
-        "five": 5,
-        "six": 6,
-        "seven": 7,
-        "eight": 8, "ate": 8,
-        "nine": 9
-    ]
-
     private static let teens: [String: Int] = [
         "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
         "fourteen": 14, "fifteen": 15, "sixteen": 16,
@@ -25,7 +12,10 @@ enum SpokenDigitParser {
         "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90
     ]
 
-    static func parseThreeDigits(from transcript: String) -> String? {
+    static func parseThreeDigits(
+        from transcript: String,
+        aliases: [String: Int]
+    ) -> String? {
         let tokens = transcript
             .lowercased()
             .split { !$0.isLetter && !$0.isNumber }
@@ -33,17 +23,17 @@ enum SpokenDigitParser {
 
         guard !tokens.isEmpty else { return nil }
 
-        if let flattened = flattenDigitTokens(tokens), flattened.count == 3 {
+        if let flattened = flattenDigitTokens(tokens, aliases: aliases), flattened.count == 3 {
             return flattened
         }
 
-        if let value = parseCardinal(tokens), (100...999).contains(value) {
+        if let value = parseCardinal(tokens, aliases: aliases), (100...999).contains(value) {
             return String(format: "%03d", value)
         }
 
         if tokens.count >= 2,
-           let first = singleDigits[tokens[0]],
-           let remaining = parseCardinal(Array(tokens.dropFirst())),
+           let first = aliases[tokens[0]],
+           let remaining = parseCardinal(Array(tokens.dropFirst()), aliases: aliases),
            (10...99).contains(remaining) {
             return "\(first)" + String(format: "%02d", remaining)
         }
@@ -51,12 +41,15 @@ enum SpokenDigitParser {
         return nil
     }
 
-    private static func flattenDigitTokens(_ tokens: [String]) -> String? {
+    private static func flattenDigitTokens(
+        _ tokens: [String],
+        aliases: [String: Int]
+    ) -> String? {
         var result = ""
         for token in tokens {
             if token.allSatisfy(\.isNumber) {
                 result += token
-            } else if let digit = singleDigits[token] {
+            } else if let digit = aliases[token] {
                 result += String(digit)
             } else {
                 return nil
@@ -65,13 +58,16 @@ enum SpokenDigitParser {
         return result
     }
 
-    private static func parseCardinal(_ tokens: [String]) -> Int? {
+    private static func parseCardinal(
+        _ tokens: [String],
+        aliases: [String: Int]
+    ) -> Int? {
         guard !tokens.isEmpty else { return nil }
 
         var value = 0
         var sawNumber = false
         for token in tokens where token != "and" {
-            if let digit = singleDigits[token] {
+            if let digit = aliases[token] {
                 value += digit
                 sawNumber = true
             } else if let teen = teens[token] {

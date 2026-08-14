@@ -78,7 +78,10 @@ final class AppModel {
               let experiment else { return }
 
         recognizedSpeech = transcript
-        guard let candidate = SpokenDigitParser.parseThreeDigits(from: transcript) else {
+        guard let candidate = SpokenDigitParser.parseThreeDigits(
+            from: transcript,
+            aliases: experiment.configuration.speech.aliasLookup
+        ) else {
             return
         }
 

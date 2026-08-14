@@ -26,6 +26,7 @@ struct RGB: Decodable, Sendable {
 struct ExperimentConfiguration: Decodable, Sendable {
     let schemaVersion: Int
     let display: DisplayConfiguration
+    let speech: SpeechConfiguration
     let stimulus: StimulusConfiguration
 }
 
@@ -50,6 +51,25 @@ enum DisplayMode: String, Decodable, CaseIterable, Sendable {
 struct DisplayConfiguration: Decodable, Sendable {
     let mode: DisplayMode
     let peakOpacity: Float
+}
+
+struct SpeechConfiguration: Decodable, Sendable {
+    let digitAliases: [String: [String]]
+
+    var aliasLookup: [String: Int] {
+        var lookup: [String: Int] = [:]
+        for (digit, aliases) in digitAliases {
+            guard let value = Int(digit) else { continue }
+            for alias in aliases {
+                lookup[Self.normalize(alias)] = value
+            }
+        }
+        return lookup
+    }
+
+    static func normalize(_ alias: String) -> String {
+        alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
 }
 
 enum StimulusEye: String, Decodable, Sendable {
@@ -198,9 +218,9 @@ enum ExperimentError: LocalizedError {
 
 private extension ExperimentConfiguration {
     func validate() throws {
-        guard schemaVersion == 2 else {
+        guard schemaVersion == 3 else {
             throw ExperimentError.invalidConfiguration(
-                "schemaVersion \(schemaVersion) is unsupported; this app requires version 2."
+                "schemaVersion \(schemaVersion) is unsupported; this app requires version 3."
             )
         }
 
@@ -209,6 +229,36 @@ private extension ExperimentConfiguration {
             throw ExperimentError.invalidConfiguration(
                 "display.peakOpacity must be a finite value between 0.0 and 1.0."
             )
+        }
+
+        let requiredDigitKeys = Set((0...9).map(String.init))
+        guard Set(speech.digitAliases.keys) == requiredDigitKeys else {
+            throw ExperimentError.invalidConfiguration(
+                "speech.digitAliases must contain exactly the keys 0 through 9."
+            )
+        }
+        var aliasOwners: [String: String] = [:]
+        for digit in requiredDigitKeys {
+            guard let aliases = speech.digitAliases[digit], !aliases.isEmpty else {
+                throw ExperimentError.invalidConfiguration(
+                    "speech.digitAliases.\(digit) must contain at least one spoken form."
+                )
+            }
+            for alias in aliases {
+                let normalized = SpeechConfiguration.normalize(alias)
+                guard !normalized.isEmpty,
+                      normalized.unicodeScalars.allSatisfy(CharacterSet.letters.contains) else {
+                    throw ExperimentError.invalidConfiguration(
+                        "speech.digitAliases.\(digit) contains ‘\(alias)’; aliases must be single words containing letters only."
+                    )
+                }
+                if let existingDigit = aliasOwners[normalized], existingDigit != digit {
+                    throw ExperimentError.invalidConfiguration(
+                        "The speech alias ‘\(normalized)’ is assigned to both \(existingDigit) and \(digit)."
+                    )
+                }
+                aliasOwners[normalized] = digit
+            }
         }
 
         let config = stimulus
@@ -330,18 +380,38 @@ private enum NumberGridGenerator {
             let middleRow = placement.row + (orientation == .vertical ? middleOffset : 0)
             let middleColumn = placement.column + (orientation == .horizontal ? middleOffset : 0)
             let verificationIndices: [Int]
+            let verificationPlacement: NumberGrid.Placement
             switch orientation {
             case .horizontal:
                 verificationIndices = [middleRow - 1, middleRow, middleRow + 1].map {
                     $0 * columns + middleColumn
                 }
+                verificationPlacement = .init(
+                    row: middleRow - 1,
+                    column: middleColumn,
+                    orientation: .vertical
+                )
             case .vertical:
                 verificationIndices = [middleColumn - 1, middleColumn, middleColumn + 1].map {
                     middleRow * columns + $0
                 }
+                verificationPlacement = .init(
+                    row: middleRow,
+                    column: middleColumn - 1,
+                    orientation: .horizontal
+                )
             }
+            let verificationDigits = verificationIndices.map { digits[$0] }
+            let verificationOccurrences = findOccurrences(
+                of: verificationDigits,
+                in: digits,
+                rows: rows,
+                columns: columns
+            )
+            guard verificationOccurrences == [verificationPlacement] else { continue }
+
             let verificationCode = String(
-                bytes: verificationIndices.map { digits[$0] },
+                bytes: verificationDigits,
                 encoding: .ascii
             )!
 
