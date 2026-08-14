@@ -54,15 +54,30 @@ The first completed trial in an app run creates a local-time-stamped file in the
 Documents/Results/result_20260814_130156.json
 ```
 
-For this initial plumbing test, the file is deliberately plain text despite its `.json` extension. Each completed trial appends one line:
+The file is always valid JSON. Its `trials` array grows after each completed trial:
 
-```text
-trial1
-trial2
-trial3
+```json
+{
+  "trials": [
+    {
+      "name": "trial1",
+      "definition": {
+        "condition_name": "condition7",
+        "block_nr": 1,
+        "random_seed": 123,
+        "digits": { "...": "complete resolved digit parameters" },
+        "boxes": { "...": "complete resolved box parameters" },
+        "fov": { "...": "complete resolved FOV parameters" },
+        "speech": { "...": "complete resolved speech parameters" }
+      }
+    }
+  ]
+}
 ```
 
-A trial advances only after its line is written successfully. The app exposes its Documents directory to the visionOS Files app. To transfer a result manually, open **Files → On My Apple Vision Pro → MobiWordFinderAVP → Results**, pinch and hold the file, choose **Share**, and AirDrop it to the Mac. Keep result files before deleting or reinstalling the development app because doing so can remove its app container.
+Each trial has its scheduled name and a complete `definition` containing the source condition name, concrete block and random seed, and every resolved parameter section. `inherits` and `repeats` are omitted because they have no meaning in a completed-trial record. Scalar arrays such as RGB values and speech aliases are formatted horizontally. No inheritance resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
+
+The app exposes its Documents directory to the visionOS Files app. To transfer a result manually, open **Files → On My Apple Vision Pro → MobiWordFinderAVP → Results**, pinch and hold the file, choose **Share**, and AirDrop it to the Mac. Keep result files before deleting or reinstalling the development app because doing so can remove its app container.
 
 ## Display compositing
 

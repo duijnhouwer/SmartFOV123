@@ -160,8 +160,7 @@ final class AppModel {
             scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
         } else if candidate == experiment.grid.verificationCode {
             do {
-                let trialNumber = currentTrialIndex + 1
-                try resultFileWriter.appendCompletedTrial(number: trialNumber)
+                try resultFileWriter.appendCompletedTrial(experiment)
                 statusMessage = "Correct — heard \(candidate)."
                 feedbackSoundPlayer.playCorrect()
                 completedTrialToken += 1
