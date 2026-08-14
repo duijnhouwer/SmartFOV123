@@ -17,9 +17,12 @@ final class ResultFileWriter {
     }
 
     @discardableResult
-    func appendCompletedTrial(_ experiment: Experiment) throws -> URL {
+    func appendCompletedTrial(
+        _ experiment: Experiment,
+        results: CompletedTrialResults
+    ) throws -> URL {
         let fileURL = try sessionFileURL()
-        let trial = CompletedTrial(experiment: experiment)
+        let trial = CompletedTrial(experiment: experiment, results: results)
         let document = ResultDocument(trials: completedTrials + [trial])
 
         let data: Data
@@ -98,13 +101,72 @@ private struct ResultDocument: Encodable {
     let trials: [CompletedTrial]
 }
 
+struct CompletedTrialResults: Encodable {
+    let startTimeMS: UInt64
+    let digitRevealMS: UInt64
+    let targetFoundMS: UInt64
+    let speech: [SpeechDetection]
+
+    struct SpeechDetection: Encodable {
+        let utterance: String
+        let ms: UInt64
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case speech
+        case startTimeMS = "start_time_ms"
+        case digitRevealMS = "digit_reveal_ms"
+        case targetFoundMS = "target_found_ms"
+    }
+}
+
 private struct CompletedTrial: Encodable {
     let name: String
     let definition: Definition
+    let seededStimulus: SeededStimulus
+    let results: CompletedTrialResults
 
-    init(experiment: Experiment) {
+    init(experiment: Experiment, results: CompletedTrialResults) {
         name = "trial\(experiment.trialNumber)"
         definition = Definition(experiment: experiment)
+        seededStimulus = SeededStimulus(experiment: experiment)
+        self.results = results
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, definition, results
+        case seededStimulus = "seeded_stimulus"
+    }
+
+    struct SeededStimulus: Encodable {
+        let targetNumber: Int
+        let targetOrientation: String
+        let responseNumber: Int
+        let grid: [[Int]]
+
+        init(experiment: Experiment) {
+            let numberGrid = experiment.grid
+            targetNumber = Int(numberGrid.targetNumber)!
+            switch numberGrid.targetPlacement.orientation {
+            case .horizontal:
+                targetOrientation = "leftright"
+            case .vertical:
+                targetOrientation = "topdown"
+            }
+            responseNumber = Int(numberGrid.verificationCode)!
+            grid = (0..<numberGrid.rows).map { row in
+                (0..<numberGrid.columns).map { column in
+                    Int(numberGrid.digits[row * numberGrid.columns + column] - 48)
+                }
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case grid
+            case targetNumber = "target_number"
+            case targetOrientation = "target_orientation"
+            case responseNumber = "response_number"
+        }
     }
 
     struct Definition: Encodable {
@@ -247,7 +309,7 @@ private enum JSONPrettyPrinter {
 
     private static func render(_ dictionary: [String: Any], level: Int) throws -> String {
         guard !dictionary.isEmpty else { return "{}" }
-        let keys = dictionary.keys.sorted()
+        let keys = orderedKeys(for: dictionary)
         let childIndent = indentation(level + 1)
         let lines = try keys.enumerated().map { index, key in
             let renderedValue = try render(dictionary[key]!, level: level + 1)
@@ -261,6 +323,9 @@ private enum JSONPrettyPrinter {
         guard !array.isEmpty else { return "[]" }
         if array.allSatisfy(isScalar) {
             return "[\(try array.map(renderScalar).joined(separator: ", "))]"
+        }
+        if array.allSatisfy(isInlineCollection) {
+            return "[\(try array.map(renderInlineCollection).joined(separator: ", "))]"
         }
 
         let childIndent = indentation(level + 1)
@@ -290,6 +355,70 @@ private enum JSONPrettyPrinter {
 
     private static func isScalar(_ value: Any) -> Bool {
         value is String || value is NSNumber || value is NSNull
+    }
+
+    private static func isInlineCollection(_ value: Any) -> Bool {
+        if let array = value as? [Any] {
+            return array.allSatisfy(isScalar)
+        }
+        if let dictionary = value as? [String: Any] {
+            return dictionary.values.allSatisfy(isScalar)
+        }
+        return false
+    }
+
+    private static func renderInlineCollection(_ value: Any) throws -> String {
+        if let array = value as? [Any] {
+            return "[\(try array.map(renderScalar).joined(separator: ", "))]"
+        }
+        if let dictionary = value as? [String: Any] {
+            let entries = try orderedKeys(for: dictionary).map { key in
+                "\(try renderScalar(key)): \(try renderScalar(dictionary[key]!))"
+            }
+            return "{\(entries.joined(separator: ", "))}"
+        }
+        throw ResultFileError.invalidEncodedJSON
+    }
+
+    private static func orderedKeys(for dictionary: [String: Any]) -> [String] {
+        let preferredOrder: [String]
+
+        if dictionary.keys.contains("trials") {
+            preferredOrder = ["trials"]
+        } else if dictionary.keys.contains("seeded_stimulus") {
+            preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
+        } else if dictionary.keys.contains("condition_name") {
+            preferredOrder = [
+                "condition_name", "block_nr", "random_seed", "digits", "boxes", "fov", "speech"
+            ]
+        } else if dictionary.keys.contains("target_number") {
+            preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
+        } else if dictionary.keys.contains("start_time_ms") {
+            preferredOrder = ["start_time_ms", "digit_reveal_ms", "target_found_ms", "speech"]
+        } else if dictionary.keys.contains("utterance") {
+            preferredOrder = ["utterance", "ms"]
+        } else if dictionary.keys.contains("font_name") {
+            preferredOrder = ["height_degrees", "font_name", "rgb", "random_method"]
+        } else if dictionary.keys.contains("number_horizontal") {
+            preferredOrder = [
+                "width_degrees", "height_degrees", "stroke_degrees", "fill_rgb", "stroke_rgb",
+                "number_horizontal", "number_vertical"
+            ]
+        } else if dictionary.keys.contains("peak_opacity") {
+            preferredOrder = [
+                "eye", "mode", "peak_opacity", "width_degrees", "height_degrees",
+                "horizontal_offset_degrees", "vertical_offset_degrees", "background_rgb",
+                "border_stroke_arcmin", "border_rgb", "distance_meters"
+            ]
+        } else if dictionary.keys.contains("aliases") {
+            preferredOrder = ["aliases"]
+        } else {
+            preferredOrder = []
+        }
+
+        let preferredKeys = preferredOrder.filter(dictionary.keys.contains)
+        let remainingKeys = dictionary.keys.filter { !preferredOrder.contains($0) }.sorted()
+        return preferredKeys + remainingKeys
     }
 
     private static func indentation(_ level: Int) -> String {

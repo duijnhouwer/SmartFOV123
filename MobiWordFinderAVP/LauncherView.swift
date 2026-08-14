@@ -112,6 +112,7 @@ struct LauncherView: View {
         switch result {
         case .opened:
             appModel.immersiveSpaceState = .open
+            appModel.markCurrentTrialStarted()
             await appModel.startSpeechConfirmation()
         case .userCancelled:
             appModel.immersiveSpaceState = .closed

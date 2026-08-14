@@ -69,13 +69,27 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "boxes": { "...": "complete resolved box parameters" },
         "fov": { "...": "complete resolved FOV parameters" },
         "speech": { "...": "complete resolved speech parameters" }
+      },
+      "seeded_stimulus": {
+        "target_number": 512,
+        "target_orientation": "leftright",
+        "response_number": 613,
+        "grid": [[4, 5, 7, 9], [6, 4, 6, 8], [2, 5, 1, 2], [8, 0, 3, 4]]
+      },
+      "results": {
+        "start_time_ms": 1204,
+        "digit_reveal_ms": 4839,
+        "target_found_ms": 12751,
+        "speech": [{"utterance": "512", "ms": 4817}, {"utterance": "613", "ms": 12751}]
       }
     }
   ]
 }
 ```
 
-Each trial has its scheduled name and a complete `definition` containing the source condition name, concrete block and random seed, and every resolved parameter section. `inherits` and `repeats` are omitted because they have no meaning in a completed-trial record. Scalar arrays such as RGB values and speech aliases are formatted horizontally. No inheritance resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
+Each trial has its scheduled name and a complete `definition` containing the source condition name, concrete block and random seed, and every resolved parameter section. `inherits` and `repeats` are omitted because they have no meaning in a completed-trial record. `seeded_stimulus` records the generated target, its `leftright` or `topdown` orientation, the expected response, and the displayed grid as rows of integer digits. `results` records monotonic integer milliseconds since app launch for the trial start, digit reveal, and correct response, plus every transcript that successfully parsed as three digits and its detection time. Speech aliases are replaced with their configured digits before storage, and an entirely numeric result is collapsed without spaces (`Free 56` becomes `356` when `free` maps to `3`). Words without a configured mapping remain visible in the stored utterance. These timestamps intentionally provide practical event timing rather than millisecond measurement precision.
+
+Scalar arrays, grid rows, and speech detections are formatted horizontally. No inheritance resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
 
 The app exposes its Documents directory to the visionOS Files app. To transfer a result manually, open **Files → On My Apple Vision Pro → MobiWordFinderAVP → Results**, pinch and hold the file, choose **Share**, and AirDrop it to the Mac. Keep result files before deleting or reinstalling the development app because doing so can remove its app container.
 

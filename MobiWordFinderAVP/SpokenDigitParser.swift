@@ -41,6 +41,26 @@ enum SpokenDigitParser {
         return nil
     }
 
+    static func normalizedForStorage(
+        _ transcript: String,
+        aliases: [String: Int]
+    ) -> String {
+        let tokens = transcript
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+
+        guard !tokens.isEmpty else { return transcript }
+
+        let mappedTokens = tokens.map { token in
+            aliases[token.lowercased()].map(String.init) ?? token
+        }
+
+        if mappedTokens.allSatisfy({ $0.allSatisfy(\.isNumber) }) {
+            return mappedTokens.joined()
+        }
+        return mappedTokens.joined(separator: " ")
+    }
+
     private static func flattenDigitTokens(
         _ tokens: [String],
         aliases: [String: Int]

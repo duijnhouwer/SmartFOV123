@@ -1,3 +1,4 @@
+import Dispatch
 import SwiftUI
 
 @MainActor
@@ -20,8 +21,10 @@ final class AppModel {
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
     private let resultFileWriter = ResultFileWriter()
     private let speechListener = SpeechConfirmationListener()
+    private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
     private var instantiatedExperiment: Experiment?
+    private var currentTrialMeasurement: InProgressTrialMeasurement?
     private(set) var currentTrialIndex = 0
     private(set) var completedTrialToken = 0
     private(set) var trialPhase: TrialPhase = .targetCue
@@ -95,6 +98,10 @@ final class AppModel {
         }
     }
 
+    func markCurrentTrialStarted() {
+        currentTrialMeasurement = .init(startTimeMS: elapsedMilliseconds())
+    }
+
     func startSpeechConfirmation() async {
         speechRestartTask?.cancel()
         speechRestartTask = nil
@@ -140,6 +147,15 @@ final class AppModel {
         ) else {
             return
         }
+        currentTrialMeasurement?.speech.append(
+            .init(
+                utterance: SpokenDigitParser.normalizedForStorage(
+                    transcript,
+                    aliases: experiment.configuration.speech.aliasLookup
+                ),
+                ms: elapsedMilliseconds()
+            )
+        )
 
         speechListener.stop()
         isListening = false
@@ -147,6 +163,7 @@ final class AppModel {
         if candidate == experiment.grid.targetNumber {
             if trialPhase == .targetCue {
                 trialPhase = .search
+                currentTrialMeasurement?.digitRevealMS = elapsedMilliseconds()
                 stimulusPresentationState.revealGrid()
                 statusMessage = "Target confirmed. Find it, then read the three crossing digits."
             }
@@ -159,10 +176,25 @@ final class AppModel {
             feedbackSoundPlayer.playWrong()
             scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
         } else if candidate == experiment.grid.verificationCode {
+            guard let measurement = currentTrialMeasurement,
+                  let digitRevealMS = measurement.digitRevealMS else {
+                statusMessage = "Correct response, but the trial timing record is incomplete."
+                print("MobiWordFinder result error: trial timing record is incomplete.")
+                return
+            }
+            let targetFoundMS = elapsedMilliseconds()
+            feedbackSoundPlayer.playCorrect()
             do {
-                try resultFileWriter.appendCompletedTrial(experiment)
+                try resultFileWriter.appendCompletedTrial(
+                    experiment,
+                    results: .init(
+                        startTimeMS: measurement.startTimeMS,
+                        digitRevealMS: digitRevealMS,
+                        targetFoundMS: targetFoundMS,
+                        speech: measurement.speech
+                    )
+                )
                 statusMessage = "Correct — heard \(candidate)."
-                feedbackSoundPlayer.playCorrect()
                 completedTrialToken += 1
             } catch {
                 statusMessage = "Correct response, but trial \(currentTrialIndex + 1) couldn't be saved: \(error.localizedDescription) Say the crossing sequence again to retry."
@@ -180,6 +212,7 @@ final class AppModel {
         guard let plan, currentTrialIndex < plan.trials.count else { return }
         currentTrialIndex += 1
         instantiatedExperiment = nil
+        currentTrialMeasurement = nil
         trialPhase = .targetCue
         stimulusPresentationState.reset()
         if hasCompletedExperiment {
@@ -215,4 +248,16 @@ final class AppModel {
             await self.startSpeechConfirmation()
         }
     }
+
+    private func elapsedMilliseconds() -> UInt64 {
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= appStartUptimeNanoseconds else { return 0 }
+        return (now - appStartUptimeNanoseconds) / 1_000_000
+    }
+}
+
+private struct InProgressTrialMeasurement {
+    let startTimeMS: UInt64
+    var digitRevealMS: UInt64?
+    var speech: [CompletedTrialResults.SpeechDetection] = []
 }
