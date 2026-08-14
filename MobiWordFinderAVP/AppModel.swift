@@ -24,6 +24,7 @@ final class AppModel {
     private(set) var currentTrialIndex = 0
     private(set) var completedTrialToken = 0
     private(set) var trialPhase: TrialPhase = .targetCue
+    private(set) var hasConfigurationError = false
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
     var recognizedSpeech: String?
@@ -34,6 +35,7 @@ final class AppModel {
             plan = try ExperimentPlan.loadBundled()
         } catch {
             plan = nil
+            hasConfigurationError = true
             statusMessage = error.localizedDescription
             print("MobiWordFinder configuration error: \(error.localizedDescription)")
         }

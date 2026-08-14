@@ -45,7 +45,7 @@ struct LauncherView: View {
             if let statusMessage = appModel.statusMessage {
                 Text(statusMessage)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appModel.hasConfigurationError ? Color.red : Color.secondary)
                     .multilineTextAlignment(.center)
             }
         }
