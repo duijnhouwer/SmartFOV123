@@ -1,38 +1,38 @@
 {
-  "schemaVersion": 4,
+  "schema_version": 5,
   "conditions": [
     {
-      "name": "main",
+      "name": "master",
       "inherits": null,
-      "blockNr": null,
+      "block_nr": null,
       "repeats": 0,
-      "randomSeed": null,
+      "random_seed": null,
       "digits": {
-        "heightDegrees": 1.4,
-        "fontName": "Arial",
+        "height_degrees": 1.4,
+        "font_name": "Arial",
         "rgb": [0.2, 0.2, 0.2]
       },
       "boxes": {
-        "widthDegrees": 2.0,
-        "heightDegrees": 2.0,
-        "strokeDegrees": 0.1,
-        "fillRGB": [0.8, 0.8, 0.8],
-        "strokeRGB": [0.0, 0.0, 0.0],
-        "numberHorizontal": 8,
-        "numberVertical": 8
+        "width_degrees": 2.0,
+        "height_degrees": 2.0,
+        "stroke_degrees": 0.1,
+        "fill_rgb": [0.8, 0.8, 0.8],
+        "stroke_rgb": [0.0, 0.0, 0.0],
+        "number_horizontal": 8,
+        "number_vertical": 8
       },
       "fov": {
         "eye": "right",
-        "mode": "opticalSeeThroughSimulation",
-        "peakOpacity": 0.35,
-        "widthDegrees": 21.21,
-        "heightDegrees": 21.21,
-        "horizontalOffsetDegrees": 0.0,
-        "verticalOffsetDegrees": 0.0,
-        "backgroundRGB": [1.0, 1.0, 1.0],
-        "borderStrokeArcmin": 5,
-        "borderRGB": [0.0, 0.0, 0.0],
-        "distanceMeters": 1.5
+        "mode": "optical_see_through_simulation",
+        "peak_opacity": 0.35,
+        "width_degrees": 21.21,
+        "height_degrees": 21.21,
+        "horizontal_offset_degrees": 0.0,
+        "vertical_offset_degrees": 0.0,
+        "background_rgb": [1.0, 1.0, 1.0],
+        "border_stroke_arcmin": 5,
+        "border_rgb": [0.0, 0.0, 0.0],
+        "distance_meters": 1.5
       },
       "speech": {
         "aliases": {
@@ -51,11 +51,11 @@
     },
     {
       "name": "fov_30_right",
-      "inherits": "main",
+      "inherits": "master",
       "fov": {
         "eye": "right",
-        "widthDegrees": 21.21,
-        "heightDegrees": 21.21
+        "width_degrees": 21.21,
+        "height_degrees": 21.21
       }
     },
     {
@@ -68,16 +68,16 @@
     {
       "name": "__condition_nr__",
       "inherits": "fov_30_right",
-      "blockNr": 1,
+      "block_nr": 1,
       "repeats": 10,
-      "randomSeed": "shuffle"
+      "random_seed": "shuffle"
     },
     {
       "name": "__condition_nr__",
       "inherits": "fov_30_both",
-      "blockNr": 1,
+      "block_nr": 1,
       "repeats": 10,
-      "randomSeed": "shuffle"
+      "random_seed": "shuffle"
     }
   ]
 }

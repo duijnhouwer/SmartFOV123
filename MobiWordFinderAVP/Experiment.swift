@@ -24,8 +24,8 @@ struct RGB: Decodable, Sendable {
 }
 
 enum DisplayMode: String, Decodable, CaseIterable, Sendable {
-    case videoPassthrough
-    case opticalSeeThroughSimulation
+    case videoPassthrough = "video_passthrough"
+    case opticalSeeThroughSimulation = "optical_see_through_simulation"
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -231,6 +231,11 @@ enum ExperimentError: LocalizedError {
 private struct ExperimentFile: Decodable {
     let schemaVersion: Int
     let conditions: [ConditionDefinition]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case conditions
+    }
 }
 
 private enum InheritedField<Value> {
@@ -269,6 +274,12 @@ private struct DigitPatch: Decodable {
     let heightDegrees: Float?
     let fontName: String?
     let rgb: RGB?
+
+    private enum CodingKeys: String, CodingKey {
+        case heightDegrees = "height_degrees"
+        case fontName = "font_name"
+        case rgb
+    }
 }
 
 private struct BoxPatch: Decodable {
@@ -279,6 +290,16 @@ private struct BoxPatch: Decodable {
     let strokeRGB: RGB?
     let numberHorizontal: Int?
     let numberVertical: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case widthDegrees = "width_degrees"
+        case heightDegrees = "height_degrees"
+        case strokeDegrees = "stroke_degrees"
+        case fillRGB = "fill_rgb"
+        case strokeRGB = "stroke_rgb"
+        case numberHorizontal = "number_horizontal"
+        case numberVertical = "number_vertical"
+    }
 }
 
 private struct FOVPatch: Decodable {
@@ -293,6 +314,19 @@ private struct FOVPatch: Decodable {
     let borderStrokeArcmin: Float?
     let borderRGB: RGB?
     let distanceMeters: Float?
+
+    private enum CodingKeys: String, CodingKey {
+        case eye, mode
+        case peakOpacity = "peak_opacity"
+        case widthDegrees = "width_degrees"
+        case heightDegrees = "height_degrees"
+        case horizontalOffsetDegrees = "horizontal_offset_degrees"
+        case verticalOffsetDegrees = "vertical_offset_degrees"
+        case backgroundRGB = "background_rgb"
+        case borderStrokeArcmin = "border_stroke_arcmin"
+        case borderRGB = "border_rgb"
+        case distanceMeters = "distance_meters"
+    }
 }
 
 private struct SpeechPatch: Decodable {
@@ -311,8 +345,9 @@ private struct ConditionDefinition: Decodable {
     let speech: SpeechPatch?
 
     private enum CodingKeys: String, CodingKey {
-        case name, inherits, repeats, randomSeed
-        case blockNumber = "blockNr"
+        case name, inherits, repeats
+        case randomSeed = "random_seed"
+        case blockNumber = "block_nr"
         case digits, boxes, fov, speech
     }
 
@@ -443,17 +478,17 @@ private enum ConditionResolver {
     static let maximumTrialCount = 10_000
 
     static func makePlan(from file: ExperimentFile) throws -> ExperimentPlan {
-        guard file.schemaVersion == 4 else {
+        guard file.schemaVersion == 5 else {
             throw ExperimentError.invalidConfiguration(
-                "schemaVersion \(file.schemaVersion) is unsupported; this app requires version 4."
+                "schema_version \(file.schemaVersion) is unsupported; this app requires version 5."
             )
         }
         guard !file.conditions.isEmpty else {
-            throw ExperimentError.invalidConfiguration("conditions must contain at least the main condition.")
+            throw ExperimentError.invalidConfiguration("conditions must contain at least the master condition.")
         }
 
         try validateDefinitionNames(file.conditions)
-        try validateMain(file.conditions[0])
+        try validateMaster(file.conditions[0])
 
         let namedDefinitions = Dictionary(
             uniqueKeysWithValues: file.conditions
@@ -484,10 +519,10 @@ private enum ConditionResolver {
             }
             guard repeats > 0 else { continue }
             guard let blockNumber = patch.blockNumber, blockNumber > 0 else {
-                throw invalid(definition.name, "a condition with repeats greater than zero requires blockNr >= 1.")
+                throw invalid(definition.name, "a condition with repeats greater than zero requires block_nr >= 1.")
             }
             guard let seedSpecification = patch.randomSeed else {
-                throw invalid(definition.name, "a condition with repeats greater than zero requires randomSeed.")
+                throw invalid(definition.name, "a condition with repeats greater than zero requires random_seed.")
             }
             if definition.name != generatedName, repeats > 1 {
                 throw invalid(
@@ -569,21 +604,21 @@ private enum ConditionResolver {
         }
     }
 
-    private static func validateMain(_ main: ConditionDefinition) throws {
-        guard main.name == "main" else {
-            throw ExperimentError.invalidConfiguration("The first condition must be named ‘main’.")
+    private static func validateMaster(_ master: ConditionDefinition) throws {
+        guard master.name == "master" else {
+            throw ExperimentError.invalidConfiguration("The first condition must be named ‘master’.")
         }
-        guard main.inherits.isNull else {
-            throw invalid("main", "inherits must be null.")
+        guard master.inherits.isNull else {
+            throw invalid("master", "inherits must be null.")
         }
-        guard main.blockNumber.isNull else {
-            throw invalid("main", "blockNr must be explicitly null.")
+        guard master.blockNumber.isNull else {
+            throw invalid("master", "block_nr must be explicitly null.")
         }
-        guard case .value(0) = main.repeats else {
-            throw invalid("main", "repeats must be explicitly set to 0.")
+        guard case .value(0) = master.repeats else {
+            throw invalid("master", "repeats must be explicitly set to 0.")
         }
-        guard main.randomSeed.isNull else {
-            throw invalid("main", "randomSeed must be explicitly null.")
+        guard master.randomSeed.isNull else {
+            throw invalid("master", "random_seed must be explicitly null.")
         }
     }
 
@@ -605,8 +640,8 @@ private enum ConditionResolver {
         case .inherited:
             throw invalid(definition.name, "inherits must be explicitly present.")
         case .null:
-            guard definition.name == "main" else {
-                throw invalid(definition.name, "only main may inherit null.")
+            guard definition.name == "master" else {
+                throw invalid(definition.name, "only master may inherit null.")
             }
         case .value(let parentName):
             guard parentName != generatedName else {
@@ -634,30 +669,30 @@ private enum ConditionResolver {
         definitionName: String
     ) throws {
         func missing(_ name: String) throws -> Never {
-            throw invalid(definitionName, "does not resolve parameter \(name); main must define every parameter.")
+            throw invalid(definitionName, "does not resolve parameter \(name); master must define every parameter.")
         }
         guard patch.repeats != nil else { try missing("repeats") }
-        guard let digitHeight = patch.digits.heightDegrees else { try missing("digits.heightDegrees") }
-        guard let fontName = patch.digits.fontName else { try missing("digits.fontName") }
+        guard let digitHeight = patch.digits.heightDegrees else { try missing("digits.height_degrees") }
+        guard let fontName = patch.digits.fontName else { try missing("digits.font_name") }
         guard patch.digits.rgb != nil else { try missing("digits.rgb") }
-        guard let boxWidth = patch.boxes.widthDegrees else { try missing("boxes.widthDegrees") }
-        guard let boxHeight = patch.boxes.heightDegrees else { try missing("boxes.heightDegrees") }
-        guard let boxStroke = patch.boxes.strokeDegrees else { try missing("boxes.strokeDegrees") }
-        guard patch.boxes.fillRGB != nil else { try missing("boxes.fillRGB") }
-        guard patch.boxes.strokeRGB != nil else { try missing("boxes.strokeRGB") }
-        guard let columns = patch.boxes.numberHorizontal else { try missing("boxes.numberHorizontal") }
-        guard let rows = patch.boxes.numberVertical else { try missing("boxes.numberVertical") }
+        guard let boxWidth = patch.boxes.widthDegrees else { try missing("boxes.width_degrees") }
+        guard let boxHeight = patch.boxes.heightDegrees else { try missing("boxes.height_degrees") }
+        guard let boxStroke = patch.boxes.strokeDegrees else { try missing("boxes.stroke_degrees") }
+        guard patch.boxes.fillRGB != nil else { try missing("boxes.fill_rgb") }
+        guard patch.boxes.strokeRGB != nil else { try missing("boxes.stroke_rgb") }
+        guard let columns = patch.boxes.numberHorizontal else { try missing("boxes.number_horizontal") }
+        guard let rows = patch.boxes.numberVertical else { try missing("boxes.number_vertical") }
         guard patch.fov.eye != nil else { try missing("fov.eye") }
         guard patch.fov.mode != nil else { try missing("fov.mode") }
-        guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peakOpacity") }
-        guard let fovWidth = patch.fov.widthDegrees else { try missing("fov.widthDegrees") }
-        guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.heightDegrees") }
-        guard let horizontalOffset = patch.fov.horizontalOffsetDegrees else { try missing("fov.horizontalOffsetDegrees") }
-        guard let verticalOffset = patch.fov.verticalOffsetDegrees else { try missing("fov.verticalOffsetDegrees") }
-        guard patch.fov.backgroundRGB != nil else { try missing("fov.backgroundRGB") }
-        guard let borderStroke = patch.fov.borderStrokeArcmin else { try missing("fov.borderStrokeArcmin") }
-        guard patch.fov.borderRGB != nil else { try missing("fov.borderRGB") }
-        guard let distance = patch.fov.distanceMeters else { try missing("fov.distanceMeters") }
+        guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peak_opacity") }
+        guard let fovWidth = patch.fov.widthDegrees else { try missing("fov.width_degrees") }
+        guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.height_degrees") }
+        guard let horizontalOffset = patch.fov.horizontalOffsetDegrees else { try missing("fov.horizontal_offset_degrees") }
+        guard let verticalOffset = patch.fov.verticalOffsetDegrees else { try missing("fov.vertical_offset_degrees") }
+        guard patch.fov.backgroundRGB != nil else { try missing("fov.background_rgb") }
+        guard let borderStroke = patch.fov.borderStrokeArcmin else { try missing("fov.border_stroke_arcmin") }
+        guard patch.fov.borderRGB != nil else { try missing("fov.border_rgb") }
+        guard let distance = patch.fov.distanceMeters else { try missing("fov.distance_meters") }
 
         let requiredDigitKeys = Set((0...9).map(String.init))
         guard Set(patch.aliases.keys) == requiredDigitKeys else {
@@ -689,19 +724,19 @@ private enum ConditionResolver {
         }
 
         let positive: [(String, Float)] = [
-            ("digits.heightDegrees", digitHeight),
-            ("boxes.widthDegrees", boxWidth),
-            ("boxes.heightDegrees", boxHeight),
-            ("fov.widthDegrees", fovWidth),
-            ("fov.heightDegrees", fovHeight),
-            ("fov.distanceMeters", distance)
+            ("digits.height_degrees", digitHeight),
+            ("boxes.width_degrees", boxWidth),
+            ("boxes.height_degrees", boxHeight),
+            ("fov.width_degrees", fovWidth),
+            ("fov.height_degrees", fovHeight),
+            ("fov.distance_meters", distance)
         ]
         for (name, value) in positive where !value.isFinite || value <= 0 {
             throw invalid(definitionName, "\(name) must be finite and greater than zero.")
         }
         let nonnegative: [(String, Float)] = [
-            ("boxes.strokeDegrees", boxStroke),
-            ("fov.borderStrokeArcmin", borderStroke)
+            ("boxes.stroke_degrees", boxStroke),
+            ("fov.border_stroke_arcmin", borderStroke)
         ]
         for (name, value) in nonnegative where !value.isFinite || value < 0 {
             throw invalid(definitionName, "\(name) must be finite and zero or greater.")
@@ -710,7 +745,7 @@ private enum ConditionResolver {
             throw invalid(definitionName, "FOV offsets must be finite.")
         }
         guard peakOpacity.isFinite, (0...1).contains(peakOpacity) else {
-            throw invalid(definitionName, "fov.peakOpacity must be between 0 and 1.")
+            throw invalid(definitionName, "fov.peak_opacity must be between 0 and 1.")
         }
         guard columns >= 3, rows >= 3 else {
             throw invalid(definitionName, "the box grid must be at least 3 × 3.")
@@ -719,10 +754,10 @@ private enum ConditionResolver {
             throw invalid(definitionName, "each box-grid dimension may be at most 254.")
         }
         guard boxStroke * 2 < min(boxWidth, boxHeight) else {
-            throw invalid(definitionName, "boxes.strokeDegrees is too large for the boxes.")
+            throw invalid(definitionName, "boxes.stroke_degrees is too large for the boxes.")
         }
         guard borderStroke / 60 * 2 < min(fovWidth, fovHeight) else {
-            throw invalid(definitionName, "fov.borderStrokeArcmin is too large for the FOV.")
+            throw invalid(definitionName, "fov.border_stroke_arcmin is too large for the FOV.")
         }
         guard boxWidth * Float(columns) <= fovWidth,
               boxHeight * Float(rows) <= fovHeight else {
@@ -736,7 +771,7 @@ private enum ConditionResolver {
             )
         }
         guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw invalid(definitionName, "digits.fontName must not be empty.")
+            throw invalid(definitionName, "digits.font_name must not be empty.")
         }
     }
 
@@ -755,7 +790,7 @@ private enum ConditionResolver {
             guard seeds.count == repeats else {
                 throw invalid(
                     definitionName,
-                    "randomSeed contains \(seeds.count) values but repeats is \(repeats)."
+                    "random_seed contains \(seeds.count) values but repeats is \(repeats)."
                 )
             }
             return seeds
@@ -846,7 +881,7 @@ private enum JSONShapeValidator {
             throw ExperimentError.invalidConfiguration("Malformed JSON: \(error.localizedDescription)")
         }
         let root = try dictionary(object, path: "$")
-        try keys(root, allowed: ["schemaVersion", "conditions"], path: "$")
+        try keys(root, allowed: ["schema_version", "conditions"], path: "$")
         guard let rawConditions = root["conditions"] as? [Any] else {
             throw invalid("$.conditions", "must be an array.")
         }
@@ -855,19 +890,19 @@ private enum JSONShapeValidator {
             let condition = try dictionary(rawCondition, path: path)
             try keys(
                 condition,
-                allowed: ["name", "inherits", "blockNr", "repeats", "randomSeed", "digits", "boxes", "fov", "speech"],
+                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "boxes", "fov", "speech"],
                 path: path
             )
-            try section(condition["digits"], path: "\(path).digits", allowed: ["heightDegrees", "fontName", "rgb"])
+            try section(condition["digits"], path: "\(path).digits", allowed: ["height_degrees", "font_name", "rgb"])
             try section(
                 condition["boxes"],
                 path: "\(path).boxes",
-                allowed: ["widthDegrees", "heightDegrees", "strokeDegrees", "fillRGB", "strokeRGB", "numberHorizontal", "numberVertical"]
+                allowed: ["width_degrees", "height_degrees", "stroke_degrees", "fill_rgb", "stroke_rgb", "number_horizontal", "number_vertical"]
             )
             try section(
                 condition["fov"],
                 path: "\(path).fov",
-                allowed: ["eye", "mode", "peakOpacity", "widthDegrees", "heightDegrees", "horizontalOffsetDegrees", "verticalOffsetDegrees", "backgroundRGB", "borderStrokeArcmin", "borderRGB", "distanceMeters"]
+                allowed: ["eye", "mode", "peak_opacity", "width_degrees", "height_degrees", "horizontal_offset_degrees", "vertical_offset_degrees", "background_rgb", "border_stroke_arcmin", "border_rgb", "distance_meters"]
             )
             if let rawSpeech = condition["speech"] {
                 let speech = try dictionary(rawSpeech, path: "\(path).speech")
