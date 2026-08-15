@@ -2,6 +2,26 @@ import AVFoundation
 import Foundation
 import Speech
 
+/// Routes the permanent microphone tap to whichever recognition request is
+/// currently active. The audio-render callback isn't main-actor isolated, so
+/// access to the request is protected independently.
+private final class SpeechAudioBufferSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+
+    func route(to request: SFSpeechAudioBufferRecognitionRequest?) {
+        lock.withLock {
+            self.request = request
+        }
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.withLock {
+            request?.append(buffer)
+        }
+    }
+}
+
 @MainActor
 final class SpeechConfirmationListener {
     enum ListenerError: LocalizedError {
@@ -24,19 +44,21 @@ final class SpeechConfirmationListener {
         }
     }
 
-    // A visionOS immersive-space transition can invalidate the RemoteIO proxy
-    // owned by an AVAudioEngine. Reusing that engine then fails in start() with
-    // "Session lookup failed". Give each recognition pass a fresh engine so it
-    // always binds to the currently active audio session.
+    // The windowless app owns one persistent compositor scene, so its RemoteIO
+    // proxy no longer changes between prompts or trials. Keep the audio session,
+    // engine, and input tap alive for the whole experiment. Repeatedly tearing
+    // them down caused proxy-session lookup failures and clipped recognition.
     private var audioEngine: AVAudioEngine?
     private static let audioSessionQueue = DispatchQueue(
         label: "SmartFOV123.AudioSession"
     )
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en_US"))
+    private let audioBufferSink = SpeechAudioBufferSink()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var sessionID: UUID?
     private var hasInputTap = false
+    private var isAudioSessionConfigured = false
 
     static func requestAuthorization() async throws {
         async let microphoneGranted = requestMicrophoneAuthorization()
@@ -54,7 +76,7 @@ final class SpeechConfirmationListener {
         onTranscription: @escaping (String) -> Void,
         onEnded: @escaping (Error?) -> Void
     ) async throws {
-        stop()
+        stopRecognitionPass()
 
         guard let recognizer, recognizer.isAvailable else {
             throw ListenerError.recognizerUnavailable
@@ -75,35 +97,31 @@ final class SpeechConfirmationListener {
             request.requiresOnDeviceRecognition = true
         }
 
-        do {
-            try await Self.configureAndActivateAudioSession()
-        } catch {
-            if sessionID == currentSessionID {
-                sessionID = nil
+        if !isAudioSessionConfigured {
+            do {
+                try await Self.configureAndActivateAudioSession()
+                isAudioSessionConfigured = true
+            } catch {
+                if sessionID == currentSessionID {
+                    sessionID = nil
+                }
+                throw error
             }
-            throw error
         }
         guard sessionID == currentSessionID else {
             throw CancellationError()
         }
 
-        let audioEngine = AVAudioEngine()
-        self.audioEngine = audioEngine
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
+        do {
+            try ensureAudioInputIsRunning()
+        } catch {
             sessionID = nil
             stopAudioInput()
-            Self.deactivateAudioSession()
-            throw ListenerError.microphoneUnavailable
+            throw error
         }
 
         recognitionRequest = request
-
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
-            request.append(buffer)
-        }
-        hasInputTap = true
+        audioBufferSink.route(to: request)
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             if let transcript = result?.bestTranscription.formattedString {
@@ -116,56 +134,70 @@ final class SpeechConfirmationListener {
             if result?.isFinal == true || error != nil {
                 Task { @MainActor [weak self] in
                     guard let self, self.sessionID == currentSessionID else { return }
-                    self.finishCurrentSession()
+                    self.finishRecognitionPass()
                     onEnded(error)
                 }
             }
         }
 
-        audioEngine.prepare()
-        do {
-            try audioEngine.start()
-        } catch {
-            stop()
-            throw error
-        }
     }
 
     func stop() {
-        stopRecognitionAndAudioInput()
-        Self.deactivateAudioSession()
+        stopRecognitionPass()
     }
 
-    /// Stops microphone capture but intentionally leaves the play-and-record
-    /// session active long enough for head-locked feedback audio to play.
+    /// Stops routing microphone buffers into speech recognition while leaving
+    /// the permanent audio graph active for uninterrupted feedback and restart.
     func pauseForFeedback() {
-        stopRecognitionAndAudioInput()
+        stopRecognitionPass()
     }
 
-    /// Stops capture and waits until all queued audio-session work has finished.
-    /// Immersive spaces use this before dismissal so visionOS cannot tear down a
-    /// scene while its microphone session is still being deactivated.
+    /// Retained as an async boundary for callers transitioning between trials.
+    /// The persistent windowless scene must not deactivate its audio session.
     func stopAndWaitForAudioSession() async {
-        stopRecognitionAndAudioInput()
-        await Self.deactivateAudioSessionAndWait()
+        stopRecognitionPass()
     }
 
-    private func stopRecognitionAndAudioInput() {
+    private func stopRecognitionPass() {
         sessionID = nil
+        audioBufferSink.route(to: nil)
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
-        stopAudioInput()
     }
 
-    private func finishCurrentSession() {
+    private func finishRecognitionPass() {
         sessionID = nil
+        audioBufferSink.route(to: nil)
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
-        stopAudioInput()
-        Self.deactivateAudioSession()
+    }
+
+    private func ensureAudioInputIsRunning() throws {
+        if let audioEngine {
+            guard !audioEngine.isRunning else { return }
+            audioEngine.prepare()
+            try audioEngine.start()
+            return
+        }
+
+        let audioEngine = AVAudioEngine()
+        let inputNode = audioEngine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw ListenerError.microphoneUnavailable
+        }
+
+        let sink = audioBufferSink
+        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
+            sink.append(buffer)
+        }
+        hasInputTap = true
+        self.audioEngine = audioEngine
+        audioEngine.prepare()
+        try audioEngine.start()
     }
 
     private func stopAudioInput() {
@@ -199,27 +231,6 @@ final class SpeechConfirmationListener {
                 } catch {
                     continuation.resume(throwing: error)
                 }
-            }
-        }
-    }
-
-    private static func deactivateAudioSession() {
-        audioSessionQueue.async {
-            try? AVAudioSession.sharedInstance().setActive(
-                false,
-                options: .notifyOthersOnDeactivation
-            )
-        }
-    }
-
-    private static func deactivateAudioSessionAndWait() async {
-        await withCheckedContinuation { continuation in
-            audioSessionQueue.async {
-                try? AVAudioSession.sharedInstance().setActive(
-                    false,
-                    options: .notifyOthersOnDeactivation
-                )
-                continuation.resume()
             }
         }
     }

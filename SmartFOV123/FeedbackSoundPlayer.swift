@@ -3,37 +3,66 @@ import AVFoundation
 import Foundation
 
 final class FeedbackSoundPlayer {
-    private let correctPlayer: AVAudioPlayer?
-    private let wrongPlayer: AVAudioPlayer?
-    private let popPlayer: AVAudioPlayer?
+    private enum Sound: Sendable {
+        case correct
+        case wrong
+        case pop
+    }
 
-    init() {
-        // The session-level setting is a fallback for visionOS versions before
-        // per-player spatial experiences became available.
-        Self.configureHeadLockedAudio()
-        correctPlayer = Self.loadPlayer(named: "correct")
-        wrongPlayer = Self.loadPlayer(named: "wrong")
-        popPlayer = Self.loadPlayer(named: "pop")
+    private final class AudioState: @unchecked Sendable {
+        var correctPlayer: AVAudioPlayer?
+        var wrongPlayer: AVAudioPlayer?
+        var popPlayer: AVAudioPlayer?
+        var isPrepared = false
+    }
+
+    private let audioQueue = DispatchQueue(label: "SmartFOV123.FeedbackAudio")
+    private let audioState = AudioState()
+
+    func prepare() async {
+        let audioState = audioState
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            audioQueue.async {
+                defer { continuation.resume() }
+                guard !audioState.isPrepared else { return }
+
+                // The session-level setting is a fallback for visionOS versions before
+                // per-player spatial experiences became available.
+                Self.configureHeadLockedAudio()
+                audioState.correctPlayer = Self.loadPlayer(named: "correct")
+                audioState.wrongPlayer = Self.loadPlayer(named: "wrong")
+                audioState.popPlayer = Self.loadPlayer(named: "pop")
+                audioState.isPrepared = true
+            }
+        }
     }
 
     func playCorrect() {
-        play(correctPlayer)
+        play(.correct)
     }
 
     func playWrong() {
-        play(wrongPlayer)
+        play(.wrong)
     }
 
     func playPop() {
-        play(popPlayer)
+        play(.pop)
     }
 
-    private func play(_ player: AVAudioPlayer?) {
-        guard let player else { return }
-        player.currentTime = 0
-        guard player.play() else {
-            print("SmartFOV123 audio error: AVAudioPlayer refused to start playback.")
-            return
+    private func play(_ sound: Sound) {
+        let audioState = audioState
+        audioQueue.async {
+            let player = switch sound {
+            case .correct: audioState.correctPlayer
+            case .wrong: audioState.wrongPlayer
+            case .pop: audioState.popPlayer
+            }
+            guard let player else { return }
+            player.currentTime = 0
+            guard player.play() else {
+                print("SmartFOV123 audio error: AVAudioPlayer refused to start playback.")
+                return
+            }
         }
     }
 

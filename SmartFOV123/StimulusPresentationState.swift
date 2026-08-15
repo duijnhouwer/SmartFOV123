@@ -26,6 +26,7 @@ final class StimulusPresentationState: @unchecked Sendable {
     private var currentTrialRequest: TrialRequest?
     private var nextTrialRevision = 1
     private var readyTrialRevision: Int?
+    private var rendererRunning = false
 
     var content: Content {
         lock.withLock { currentContent }
@@ -33,6 +34,16 @@ final class StimulusPresentationState: @unchecked Sendable {
 
     var trialRequest: TrialRequest? {
         lock.withLock { currentTrialRequest }
+    }
+
+    var isRendererRunning: Bool {
+        lock.withLock { rendererRunning }
+    }
+
+    func markRendererRunning() {
+        lock.withLock {
+            rendererRunning = true
+        }
     }
 
     func prepareTrial(experiment: Experiment, trialsRemaining: Int) -> Int {

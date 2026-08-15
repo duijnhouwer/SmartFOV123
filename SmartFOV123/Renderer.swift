@@ -316,11 +316,16 @@ actor Renderer {
     }
 
     private func renderLoop() {
+        var hasMarkedRendererRunning = false
         while true {
             updateTrialResources()
 
             switch layerRenderer.state {
             case .running:
+                if !hasMarkedRendererRunning {
+                    presentationState.markRendererRunning()
+                    hasMarkedRendererRunning = true
+                }
                 publishState(.open)
                 autoreleasepool {
                     renderFrame()

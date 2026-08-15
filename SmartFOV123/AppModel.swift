@@ -268,7 +268,16 @@ final class AppModel {
         }
 
         immersiveSpaceState = .open
+        await waitForRendererToStart()
         await startSpeechConfirmation()
+    }
+
+    private func waitForRendererToStart() async {
+        let timeout = ContinuousClock.now.advanced(by: .seconds(2))
+        while !stimulusPresentationState.isRendererRunning,
+              ContinuousClock.now < timeout {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     func markCurrentTrialStarted() {
@@ -307,6 +316,7 @@ final class AppModel {
             case .search:
                 statusMessage = "Listening… find the target, then read the three crossing digits."
             }
+            await feedbackSoundPlayer.prepare()
         } catch {
             isListening = false
             if error is CancellationError {
