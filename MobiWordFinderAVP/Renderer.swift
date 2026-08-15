@@ -123,6 +123,7 @@ actor Renderer {
     private let layerRenderer: LayerRenderer
     private let appModel: AppModel
     private let experiment: Experiment
+    private let presentationGeneration: Int
     private let geometry: StimulusGeometry
     private let arSession = ARKitSession()
     private let worldTracking = WorldTrackingProvider()
@@ -146,11 +147,14 @@ actor Renderer {
     init(
         _ layerRenderer: LayerRenderer,
         appModel: AppModel,
-        experiment: Experiment
+        experiment: Experiment,
+        trialsRemaining: Int,
+        presentationGeneration: Int
     ) throws {
         self.layerRenderer = layerRenderer
         self.appModel = appModel
         self.experiment = experiment
+        self.presentationGeneration = presentationGeneration
         self.presentationState = appModel.stimulusPresentationState
         self.geometry = StimulusGeometry(configuration: experiment.configuration.stimulus)
 
@@ -163,12 +167,14 @@ actor Renderer {
             device: device,
             commandQueue: commandQueue,
             experiment: experiment,
+            trialsRemaining: trialsRemaining,
             presentation: .masked
         )
         self.revealedStimulusTexture = try StimulusTexture(
             device: device,
             commandQueue: commandQueue,
             experiment: experiment,
+            trialsRemaining: trialsRemaining,
             presentation: .revealed
         )
 
@@ -250,19 +256,26 @@ actor Renderer {
             appModel.statusMessage = RendererError.experimentMissing.localizedDescription
             return
         }
+        let trialsRemaining = max(0, appModel.trialCount - appModel.currentTrialIndex)
+        let presentationGeneration = appModel.immersivePresentationGeneration
         Task(executorPreference: RenderTaskExecutor.shared) {
             do {
                 let renderer = try Renderer(
                     layerRenderer,
                     appModel: appModel,
-                    experiment: experiment
+                    experiment: experiment,
+                    trialsRemaining: trialsRemaining,
+                    presentationGeneration: presentationGeneration
                 )
                 try await renderer.startARSession()
                 await renderer.renderLoop()
             } catch {
                 await MainActor.run {
                     appModel.statusMessage = error.localizedDescription
-                    appModel.immersiveSpaceState = .open
+                    appModel.publishImmersiveSpaceState(
+                        .open,
+                        generation: presentationGeneration
+                    )
                 }
             }
         }
@@ -311,7 +324,10 @@ actor Renderer {
         guard lastPublishedState != state else { return }
         lastPublishedState = state
         Task { @MainActor in
-            appModel.immersiveSpaceState = state
+            appModel.publishImmersiveSpaceState(
+                state,
+                generation: presentationGeneration
+            )
         }
     }
 

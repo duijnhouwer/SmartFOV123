@@ -1,4 +1,5 @@
 import AudioToolbox
+import AVFoundation
 import Foundation
 
 final class FeedbackSoundPlayer {
@@ -7,6 +8,7 @@ final class FeedbackSoundPlayer {
     private var popSoundID: SystemSoundID?
 
     init() {
+        Self.configureHeadLockedAudio()
         correctSoundID = Self.loadSound(named: "correct")
         wrongSoundID = Self.loadSound(named: "wrong")
         popSoundID = Self.loadSound(named: "pop")
@@ -39,6 +41,20 @@ final class FeedbackSoundPlayer {
     private func play(_ soundID: SystemSoundID?) {
         guard let soundID else { return }
         AudioServicesPlaySystemSound(soundID)
+    }
+
+    private static func configureHeadLockedAudio() {
+        do {
+            let experience: any AVAudioSessionSpatialExperience = .fixed(
+                soundStageSize: .small
+            )
+            try AVAudioSession.sharedInstance().setIntendedSpatialExperience(experience)
+        } catch {
+            print(
+                "MobiWordFinder audio error: couldn't configure head-locked audio "
+                    + "(\(error.localizedDescription))."
+            )
+        }
     }
 
     private static func loadSound(named name: String) -> SystemSoundID? {

@@ -10,6 +10,7 @@ struct MobiWordFinderAVPApp: App {
             LauncherView()
                 .environment(appModel)
         }
+        .defaultSize(width: 512, height: 720)
 
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             StimulusCompositorLayer(appModel: appModel)

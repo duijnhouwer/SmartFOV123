@@ -42,6 +42,7 @@ final class AppModel {
     private(set) var currentTrialIndex = 0
     private(set) var completedTrialToken = 0
     private(set) var beginExperimentToken = 0
+    private(set) var immersivePresentationGeneration = 0
     private(set) var subjectNumber: String?
     private(set) var trialPhase: TrialPhase = .participantNumber
     private(set) var hasConfigurationError = false
@@ -160,6 +161,18 @@ final class AppModel {
     func markCurrentTrialStartedIfReady() {
         guard hasExperimentBegun, trialPhase == .targetCue else { return }
         markCurrentTrialStarted()
+    }
+
+    func beginImmersivePresentation() {
+        immersivePresentationGeneration += 1
+    }
+
+    func publishImmersiveSpaceState(
+        _ state: ImmersiveSpaceState,
+        generation: Int
+    ) {
+        guard generation == immersivePresentationGeneration else { return }
+        immersiveSpaceState = state
     }
 
     func requestSpeechAuthorization() async -> Bool {

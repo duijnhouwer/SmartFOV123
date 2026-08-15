@@ -22,8 +22,8 @@
         "stroke_degrees": 0.1,
         "fill_rgb": [0.8, 0.8, 0.8],
         "stroke_rgb": [0.0, 0.0, 0.0],
-        "number_horizontal": 8,
-        "number_vertical": 8
+        "number_horizontal": 6,
+        "number_vertical": 6
       },
       "fov": {
         "eye": "right",

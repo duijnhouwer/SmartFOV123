@@ -16,6 +16,7 @@ struct StimulusTexture {
         device: MTLDevice,
         commandQueue: MTLCommandQueue,
         experiment: Experiment,
+        trialsRemaining: Int,
         presentation: Presentation
     ) throws {
         let config = experiment.configuration.stimulus
@@ -156,7 +157,7 @@ struct StimulusTexture {
             ]
 
             Self.drawText(
-                experiment.grid.targetNumber,
+                "Target = \(experiment.grid.targetNumber)",
                 centeredAt: CGPoint(
                     x: gridRect.midX,
                     y: gridRect.maxY + desiredCapHeight
@@ -182,6 +183,16 @@ struct StimulusTexture {
                     in: context
                 )
             }
+
+            Self.drawText(
+                String(format: "%03d trials remain", max(0, trialsRemaining)),
+                centeredAt: CGPoint(
+                    x: gridRect.midX,
+                    y: gridRect.minY - desiredCapHeight
+                ),
+                attributes: attributes,
+                in: context
+            )
 
             let fovStrokeMeters = Self.sizeMeters(
                 degrees: config.fovBorderStrokeArcmin / 60,

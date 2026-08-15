@@ -14,7 +14,7 @@ struct LauncherView: View {
             Text(appModel.trialDescription)
                 .multilineTextAlignment(.center)
 
-            Text("Start the sequence here, then follow the target and spoken prompts in the immersive view. Correct responses advance automatically; return to this window only if you need to stop.")
+            Text("The sequence starts automatically. Follow the target and spoken prompts in the immersive view; correct responses advance to the next trial.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -29,19 +29,6 @@ struct LauncherView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            Button {
-                Task { @MainActor in
-                    await toggleTest()
-                }
-            } label: {
-                Text(buttonTitle)
-            }
-            .disabled(
-                appModel.immersiveSpaceState == .inTransition
-                    || appModel.plan == nil
-                    || appModel.hasCompletedExperiment
-            )
 
             if let statusMessage = appModel.statusMessage {
                 Text(statusMessage)
@@ -60,9 +47,17 @@ struct LauncherView: View {
             await startTest()
         }
         .onDisappear {
+            guard appModel.immersiveSpaceState == .open else { return }
+            // Remove the stimulus synchronously. The window's environment can
+            // disappear before its asynchronous immersive-space dismissal has
+            // completed, but the participant must never be left viewing it.
+            appModel.stimulusPresentationState.hide()
+            appModel.immersiveSpaceState = .inTransition
             Task { @MainActor in
-                guard appModel.immersiveSpaceState == .open else { return }
-                await stopTest(message: nil)
+                await dismissImmersiveSpace()
+                await appModel.stopSpeechConfirmation()
+                appModel.immersiveSpaceState = .closed
+                appModel.statusMessage = nil
             }
         }
         .onChange(of: appModel.completedTrialToken) { _, _ in
@@ -84,17 +79,6 @@ struct LauncherView: View {
         }
     }
 
-    private var buttonTitle: String {
-        switch appModel.immersiveSpaceState {
-        case .closed:
-            return "Start sequence"
-        case .inTransition:
-            return "Please wait…"
-        case .open:
-            return "Stop sequence"
-        }
-    }
-
     private var listeningLabel: String {
         switch appModel.trialPhase {
         case .participantConfirmation:
@@ -103,18 +87,6 @@ struct LauncherView: View {
             return "Listening for begin or quit"
         case .participantNumber, .targetCue, .search:
             return "Listening for digits"
-        }
-    }
-
-    @MainActor
-    private func toggleTest() async {
-        switch appModel.immersiveSpaceState {
-        case .closed:
-            await startTest()
-        case .open:
-            await stopTest(message: nil)
-        case .inTransition:
-            break
         }
     }
 
@@ -135,6 +107,7 @@ struct LauncherView: View {
         }
 
         appModel.prepareImmersivePresentation()
+        appModel.beginImmersivePresentation()
 
         let result = await openImmersiveSpace(id: appModel.activeImmersiveSpaceID)
 
