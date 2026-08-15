@@ -16,15 +16,19 @@ struct StimulusCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfigurat
         capabilities: LayerRenderer.Capabilities,
         configuration: inout LayerRenderer.Configuration
     ) {
-        // Disabling foveation keeps the spatial sampling of the digit grid
-        // uniform for this initial experimental implementation.
-        configuration.isFoveationEnabled = false
+        // Let visionOS concentrate rasterization density at the participant's
+        // fixation point, where high-acuity digit reading occurs.
+        let foveationEnabled = capabilities.supportsFoveation
+        configuration.isFoveationEnabled = foveationEnabled
 
         if capabilities.supportedDepthFormats.contains(.depth32Float) {
             configuration.depthFormat = .depth32Float
         }
 
-        let layouts = capabilities.supportedLayouts(options: [])
+        let options: LayerRenderer.Capabilities.SupportedLayoutsOptions = foveationEnabled
+            ? [.foveationEnabled]
+            : []
+        let layouts = capabilities.supportedLayouts(options: options)
         configuration.layout = layouts.contains(.dedicated) ? .dedicated : .layered
     }
 }

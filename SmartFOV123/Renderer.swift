@@ -602,6 +602,9 @@ actor Renderer {
             depthAttachment.loadAction = .clear
             depthAttachment.storeAction = .store
             depthAttachment.clearDepth = 0
+            if drawable.rasterizationRateMaps.indices.contains(textureMap.textureIndex) {
+                descriptor.rasterizationRateMap = drawable.rasterizationRateMaps[textureMap.textureIndex]
+            }
 
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
                 publishError("Metal couldn't create a render encoder.")

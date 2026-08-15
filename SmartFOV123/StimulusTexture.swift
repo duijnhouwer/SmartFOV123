@@ -21,12 +21,10 @@ struct StimulusTexture {
     ) throws {
         let config = experiment.configuration.stimulus
         let display = experiment.configuration.display
-        // Preserve the established 512-pixel-per-box source raster while
-        // retaining four times more linear detail in the uploaded texture.
-        // This gives compositor foveation high-resolution glyph data without
-        // increasing the temporary Core Graphics bitmap allocation.
-        let supersamplingFactor = 2
-        let pixelsPerBox = 256
+        // Keep the CPU resampling path available for comparisons while
+        // rasterizing directly at the final texture resolution.
+        let supersamplingFactor = 1
+        let pixelsPerBox = 128
 
         let fovWidthMeters = Self.sizeMeters(
             degrees: config.fovWidthDegrees,
@@ -64,7 +62,6 @@ struct StimulusTexture {
         let sourceWidth = width * supersamplingFactor
         let sourceHeight = height * supersamplingFactor
         let sourceBytesPerRow = sourceWidth * 4
-
         var sourcePixels = [UInt8](
             repeating: 0,
             count: sourceBytesPerRow * sourceHeight
