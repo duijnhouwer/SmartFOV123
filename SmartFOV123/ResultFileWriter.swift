@@ -115,7 +115,7 @@ final class ResultFileWriter {
         }
 
         fileURL = candidateURL
-        print("MobiWordFinder results file: \(candidateURL.path)")
+        print("SmartFOV123 results file: \(candidateURL.path)")
         return candidateURL
     }
 }
@@ -126,7 +126,7 @@ private struct ResultDocument: Encodable {
 }
 
 private struct ResultExperiment: Encodable {
-    let application = "mobiWordFinderAVP"
+    let application = "SmartFOV123"
     let protocolName: String
     let subjectNumber: String
     let startDate: String

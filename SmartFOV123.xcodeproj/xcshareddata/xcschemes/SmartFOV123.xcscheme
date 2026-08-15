@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A00000000000000000000002"
-               BuildableName = "MobiWordFinderAVP.app"
-               BlueprintName = "MobiWordFinderAVP"
-               ReferencedContainer = "container:MobiWordFinderAVP.xcodeproj">
+               BuildableName = "SmartFOV123.app"
+               BlueprintName = "SmartFOV123"
+               ReferencedContainer = "container:SmartFOV123.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -46,9 +46,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A00000000000000000000002"
-            BuildableName = "MobiWordFinderAVP.app"
-            BlueprintName = "MobiWordFinderAVP"
-            ReferencedContainer = "container:MobiWordFinderAVP.xcodeproj">
+            BuildableName = "SmartFOV123.app"
+            BlueprintName = "SmartFOV123"
+            ReferencedContainer = "container:SmartFOV123.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -63,9 +63,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A00000000000000000000002"
-            BuildableName = "MobiWordFinderAVP.app"
-            BlueprintName = "MobiWordFinderAVP"
-            ReferencedContainer = "container:MobiWordFinderAVP.xcodeproj">
+            BuildableName = "SmartFOV123.app"
+            BlueprintName = "SmartFOV123"
+            ReferencedContainer = "container:SmartFOV123.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

@@ -261,7 +261,7 @@ struct StimulusTexture {
               let blitEncoder = commandBuffer.makeBlitCommandEncoder() else {
             throw StimulusTextureError.mipmapEncodingFailed
         }
-        blitEncoder.label = "WordFinder FOV mipmap generation"
+        blitEncoder.label = "SmartFOV123 FOV mipmap generation"
         blitEncoder.generateMipmaps(for: texture)
         blitEncoder.endEncoding()
         commandBuffer.commit()

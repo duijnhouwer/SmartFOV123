@@ -1,6 +1,6 @@
 # ChatGPT project context
 
-This directory is a local mirror of the ChatGPT project “Mobi WordFinder for AVP”.
+This directory is a local mirror of the ChatGPT project “SmartFOV123”.
 
 - Treat every file under `sources/` as read-only reference material.
 - Do not edit, rename, move, or delete synced project files.

@@ -15,7 +15,7 @@ private extension LayerRenderer.Clock.Instant {
 
 private final class RenderTaskExecutor: TaskExecutor {
     static let shared = RenderTaskExecutor()
-    private let queue = DispatchQueue(label: "MobiWordFinderAVPRenderThread", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "SmartFOV123RenderThread", qos: .userInteractive)
 
     func enqueue(_ job: UnownedJob) {
         queue.async {
@@ -214,7 +214,7 @@ actor Renderer {
         }
 
         let depthDescriptor = MTLDepthStencilDescriptor()
-        // Every WordFinder primitive lies on one stimulus plane. Comparing
+        // Every SmartFOV123 primitive lies on one stimulus plane. Comparing
         // coplanar depths causes unstable z-fighting between the FOV, boxes,
         // and glyphs. Always accept fragments so painter's order determines
         // their appearance while retaining depth writes for composition.
@@ -229,7 +229,7 @@ actor Renderer {
         do {
             self.residencySets = try (0..<Self.maxFramesInFlight).map { index in
                 let descriptor = MTLResidencySetDescriptor()
-                descriptor.label = "WordFinder frame \(index)"
+                descriptor.label = "SmartFOV123 frame \(index)"
                 descriptor.initialCapacity = 8
                 return try device.makeResidencySet(descriptor: descriptor)
             }
@@ -240,7 +240,7 @@ actor Renderer {
         guard let endFrameEvent = device.makeSharedEvent() else {
             throw RendererError.residencySetCreationFailed(
                 NSError(
-                    domain: "MobiWordFinderAVP",
+                    domain: "SmartFOV123",
                     code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Metal couldn't create a frame synchronization event."]
                 )
@@ -384,7 +384,7 @@ actor Renderer {
             drawable.deviceAnchor = deviceAnchor
         }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
-        commandBuffer.label = "WordFinder frame"
+        commandBuffer.label = "SmartFOV123 frame"
         let stimulusTexture: MTLTexture
         let presentationContent = presentationState.content
         let rendersStimulus: Bool
@@ -476,7 +476,7 @@ actor Renderer {
                 continue
             }
 
-            encoder.label = viewIndex == 0 ? "WordFinder left view" : "WordFinder right view"
+            encoder.label = viewIndex == 0 ? "SmartFOV123 left view" : "SmartFOV123 right view"
             encoder.setViewport(textureMap.viewport)
             encoder.setRenderPipelineState(visualPipelineState)
             encoder.setDepthStencilState(depthState)
@@ -554,7 +554,7 @@ actor Renderer {
         let configuredArcminutes = experiment.configuration.stimulus.digitHeightArcmin
         print(
             String(
-                format: "MobiWordFinder: %@ eye viewport %.0f x %.0f; %.1f arcmin digit cap height projects to %.2f pixels.",
+                format: "SmartFOV123: %@ eye viewport %.0f x %.0f; %.1f arcmin digit cap height projects to %.2f pixels.",
                 eyeLabel,
                 viewport.width,
                 viewport.height,

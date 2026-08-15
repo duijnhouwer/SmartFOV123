@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct MobiWordFinderAVPApp: App {
+struct SmartFOV123App: App {
     private let appHostWindowID = "AppHostWindow"
     private let operatorWindowID = "OperatorWindow"
     @State private var appModel = AppModel()
@@ -43,7 +43,7 @@ private struct AppHostView: View {
     @State private var hasPushedOperatorWindow = false
 
     var body: some View {
-        ProgressView("Starting MobiWordFinderAVP…")
+        ProgressView("Starting SmartFOV123…")
             .task {
                 guard !hasPushedOperatorWindow else { return }
                 hasPushedOperatorWindow = true

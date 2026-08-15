@@ -26,8 +26,8 @@ final class AppModel {
         let emphasizedText: String?
     }
 
-    let immersiveSpaceID = "MobiWordFinderSpace"
-    let participantSpaceID = "MobiWordFinderParticipantSpace"
+    let immersiveSpaceID = "SmartFOV123Space"
+    let participantSpaceID = "SmartFOV123ParticipantSpace"
     let plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
@@ -59,7 +59,7 @@ final class AppModel {
             plan = nil
             hasConfigurationError = true
             statusMessage = error.localizedDescription
-            print("MobiWordFinder configuration error: \(error.localizedDescription)")
+            print("SmartFOV123 configuration error: \(error.localizedDescription)")
         }
     }
 
@@ -313,7 +313,7 @@ final class AppModel {
             guard let measurement = currentTrialMeasurement,
                   let digitRevealMS = measurement.digitRevealMS else {
                 statusMessage = "Correct response, but the trial timing record is incomplete."
-                print("MobiWordFinder result error: trial timing record is incomplete.")
+                print("SmartFOV123 result error: trial timing record is incomplete.")
                 return
             }
             let targetFoundMS = elapsedMilliseconds()
@@ -332,7 +332,7 @@ final class AppModel {
                 completedTrialToken += 1
             } catch {
                 statusMessage = "Correct response, but trial \(currentTrialIndex + 1) couldn't be saved: \(error.localizedDescription) Say the crossing sequence again to retry."
-                print("MobiWordFinder result error: \(error.localizedDescription)")
+                print("SmartFOV123 result error: \(error.localizedDescription)")
                 scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
             }
         } else {
@@ -498,7 +498,7 @@ final class AppModel {
         // app to terminate itself, and calling exit() is not considered good
         // platform style or appropriate behavior for an App Store app.
         //
-        // MobiWordFinderAVP is a privately deployed research application. Its
+        // SmartFOV123 is a privately deployed research application. Its
         // spoken “Quit” command has an explicit experimental requirement to
         // end the entire process, so we deliberately use exit() here instead
         // of merely dismissing the app's windows and immersive space.

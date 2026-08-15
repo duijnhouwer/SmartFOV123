@@ -32,7 +32,7 @@ final class FeedbackSoundPlayer {
         guard let player else { return }
         player.currentTime = 0
         guard player.play() else {
-            print("MobiWordFinder audio error: AVAudioPlayer refused to start playback.")
+            print("SmartFOV123 audio error: AVAudioPlayer refused to start playback.")
             return
         }
     }
@@ -45,7 +45,7 @@ final class FeedbackSoundPlayer {
             try AVAudioSession.sharedInstance().setIntendedSpatialExperience(experience)
         } catch {
             print(
-                "MobiWordFinder audio error: couldn't configure head-locked audio "
+                "SmartFOV123 audio error: couldn't configure head-locked audio "
                     + "(\(error.localizedDescription))."
             )
         }
@@ -55,7 +55,7 @@ final class FeedbackSoundPlayer {
         let url = Bundle.main.url(forResource: name, withExtension: "caf")
             ?? Bundle.main.url(forResource: name, withExtension: "caf", subdirectory: "Config")
         guard let url else {
-            print("MobiWordFinder audio error: \(name).caf is missing from the app bundle.")
+            print("SmartFOV123 audio error: \(name).caf is missing from the app bundle.")
             return nil
         }
 
@@ -71,7 +71,7 @@ final class FeedbackSoundPlayer {
             return player
         } catch {
             print(
-                "MobiWordFinder audio error: couldn't load \(name).caf "
+                "SmartFOV123 audio error: couldn't load \(name).caf "
                     + "(\(error.localizedDescription))."
             )
             return nil

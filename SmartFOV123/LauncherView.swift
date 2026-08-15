@@ -8,7 +8,7 @@ struct LauncherView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Text("MobiWordFinderAVP")
+            Text("SmartFOV123")
                 .font(.title)
 
             Text(appModel.trialDescription)

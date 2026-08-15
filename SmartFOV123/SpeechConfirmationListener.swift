@@ -30,7 +30,7 @@ final class SpeechConfirmationListener {
     // always binds to the currently active audio session.
     private var audioEngine: AVAudioEngine?
     private static let audioSessionQueue = DispatchQueue(
-        label: "MobiWordFinderAVP.AudioSession"
+        label: "SmartFOV123.AudioSession"
     )
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en_US"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?

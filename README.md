@@ -1,4 +1,4 @@
-# MobiWordFinderAVP
+# SmartFOV123
 
 A configurable visionOS number-finding experiment rendered independently to either or both eyes over passthrough with Compositor Services and Metal.
 
@@ -36,7 +36,7 @@ Grid generation happens when each trial is about to run. The target is drawn fir
 
 ## Run on Apple Vision Pro
 
-1. Open `MobiWordFinderAVP.xcodeproj` in Xcode.
+1. Open `SmartFOV123.xcodeproj` in Xcode.
 2. In **Signing & Capabilities**, select your Personal Team.
 3. Pair the headset, enable Developer Mode, and select it as the run destination.
 4. Build and run.
@@ -59,7 +59,7 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
 ```json
 {
   "experiment": {
-    "application": "mobiWordFinderAVP",
+    "application": "SmartFOV123",
     "protocol_name": "example",
     "subject_number": "007",
     "start_date": "2026-08-14",
@@ -98,7 +98,7 @@ The `experiment` block records the application, configured protocol, confirmed p
 
 Scalar arrays, grid rows, and speech detections are formatted horizontally. No inheritance resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
 
-The app exposes its Documents directory to the visionOS Files app. To transfer a result manually, open **Files → On My Apple Vision Pro → MobiWordFinderAVP → Results**, pinch and hold the file, choose **Share**, and AirDrop it to the Mac. Keep result files before deleting or reinstalling the development app because doing so can remove its app container.
+The app exposes its Documents directory to the visionOS Files app. To transfer a result manually, open **Files → On My Apple Vision Pro → SmartFOV123 → Results**, pinch and hold the file, choose **Share**, and AirDrop it to the Mac. Keep result files before deleting or reinstalling the development app because doing so can remove its app container.
 
 ## Display compositing
 
