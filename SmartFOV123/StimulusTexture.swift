@@ -157,7 +157,7 @@ struct StimulusTexture {
             ]
 
             Self.drawText(
-                "Target = \(experiment.grid.targetNumber)",
+                "Find \(experiment.grid.targetNumber)",
                 centeredAt: CGPoint(
                     x: gridRect.midX,
                     y: gridRect.maxY + desiredCapHeight
