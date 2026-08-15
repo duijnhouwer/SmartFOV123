@@ -148,7 +148,7 @@ struct LauncherView: View {
 
     @MainActor
     private func stopTest(message: String?) async {
-        appModel.stopSpeechConfirmation()
+        await appModel.stopSpeechConfirmation()
         appModel.immersiveSpaceState = .inTransition
         await dismissImmersiveSpace()
         appModel.immersiveSpaceState = .closed

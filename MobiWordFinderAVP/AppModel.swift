@@ -205,14 +205,20 @@ final class AppModel {
             }
         } catch {
             isListening = false
-            statusMessage = "Speech recognition couldn't start: \(error.localizedDescription)"
+            if error is CancellationError {
+                return
+            }
+            statusMessage = "Speech recognition couldn't start: \(error.localizedDescription) Retrying…"
+            if immersiveSpaceState == .open {
+                scheduleSpeechRestart(afterNanoseconds: 1_000_000_000)
+            }
         }
     }
 
-    func stopSpeechConfirmation() {
+    func stopSpeechConfirmation() async {
         speechRestartTask?.cancel()
         speechRestartTask = nil
-        speechListener.stop()
+        await speechListener.stopAndWaitForAudioSession()
         isListening = false
     }
 

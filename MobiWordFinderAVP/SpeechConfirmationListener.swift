@@ -24,7 +24,11 @@ final class SpeechConfirmationListener {
         }
     }
 
-    private let audioEngine = AVAudioEngine()
+    // A visionOS immersive-space transition can invalidate the RemoteIO proxy
+    // owned by an AVAudioEngine. Reusing that engine then fails in start() with
+    // "Session lookup failed". Give each recognition pass a fresh engine so it
+    // always binds to the currently active audio session.
+    private var audioEngine: AVAudioEngine?
     private static let audioSessionQueue = DispatchQueue(
         label: "MobiWordFinderAVP.AudioSession"
     )
@@ -83,10 +87,13 @@ final class SpeechConfirmationListener {
             throw CancellationError()
         }
 
+        let audioEngine = AVAudioEngine()
+        self.audioEngine = audioEngine
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             sessionID = nil
+            stopAudioInput()
             Self.deactivateAudioSession()
             throw ListenerError.microphoneUnavailable
         }
@@ -125,6 +132,19 @@ final class SpeechConfirmationListener {
     }
 
     func stop() {
+        stopRecognitionAndAudioInput()
+        Self.deactivateAudioSession()
+    }
+
+    /// Stops capture and waits until all queued audio-session work has finished.
+    /// Immersive spaces use this before dismissal so visionOS cannot tear down a
+    /// scene while its microphone session is still being deactivated.
+    func stopAndWaitForAudioSession() async {
+        stopRecognitionAndAudioInput()
+        await Self.deactivateAudioSessionAndWait()
+    }
+
+    private func stopRecognitionAndAudioInput() {
         sessionID = nil
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -139,9 +159,14 @@ final class SpeechConfirmationListener {
         recognitionRequest?.endAudio()
         recognitionRequest = nil
         stopAudioInput()
+        Self.deactivateAudioSession()
     }
 
     private func stopAudioInput() {
+        guard let audioEngine else {
+            hasInputTap = false
+            return
+        }
         if audioEngine.isRunning {
             audioEngine.stop()
         }
@@ -149,7 +174,8 @@ final class SpeechConfirmationListener {
             audioEngine.inputNode.removeTap(onBus: 0)
             hasInputTap = false
         }
-        Self.deactivateAudioSession()
+        audioEngine.reset()
+        self.audioEngine = nil
     }
 
     private static func configureAndActivateAudioSession() async throws {
@@ -177,6 +203,18 @@ final class SpeechConfirmationListener {
                 false,
                 options: .notifyOthersOnDeactivation
             )
+        }
+    }
+
+    private static func deactivateAudioSessionAndWait() async {
+        await withCheckedContinuation { continuation in
+            audioSessionQueue.async {
+                try? AVAudioSession.sharedInstance().setActive(
+                    false,
+                    options: .notifyOthersOnDeactivation
+                )
+                continuation.resume()
+            }
         }
     }
 
