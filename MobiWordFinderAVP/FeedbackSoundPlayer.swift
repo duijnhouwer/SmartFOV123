@@ -4,10 +4,12 @@ import Foundation
 final class FeedbackSoundPlayer {
     private var correctSoundID: SystemSoundID?
     private var wrongSoundID: SystemSoundID?
+    private var popSoundID: SystemSoundID?
 
     init() {
         correctSoundID = Self.loadSound(named: "correct")
         wrongSoundID = Self.loadSound(named: "wrong")
+        popSoundID = Self.loadSound(named: "pop")
     }
 
     deinit {
@@ -17,6 +19,9 @@ final class FeedbackSoundPlayer {
         if let wrongSoundID {
             AudioServicesDisposeSystemSoundID(wrongSoundID)
         }
+        if let popSoundID {
+            AudioServicesDisposeSystemSoundID(popSoundID)
+        }
     }
 
     func playCorrect() {
@@ -25,6 +30,10 @@ final class FeedbackSoundPlayer {
 
     func playWrong() {
         play(wrongSoundID)
+    }
+
+    func playPop() {
+        play(popSoundID)
     }
 
     private func play(_ soundID: SystemSoundID?) {

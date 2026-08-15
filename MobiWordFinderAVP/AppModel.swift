@@ -265,6 +265,7 @@ final class AppModel {
                 trialPhase = .search
                 currentTrialMeasurement?.digitRevealMS = elapsedMilliseconds()
                 stimulusPresentationState.revealGrid()
+                feedbackSoundPlayer.playPop()
                 statusMessage = "Target confirmed. Find it, then read the three crossing digits."
             }
             // Participants naturally repeat the target while searching. Treat
