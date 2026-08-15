@@ -1,4 +1,3 @@
-import Accelerate
 import CoreGraphics
 import CoreText
 import Foundation
@@ -21,9 +20,8 @@ struct StimulusTexture {
     ) throws {
         let config = experiment.configuration.stimulus
         let display = experiment.configuration.display
-        // Keep the CPU resampling path available for comparisons while
-        // rasterizing directly at the final texture resolution.
-        let supersamplingFactor = 1
+        // Core Graphics antialiases glyph edges directly at the final texture
+        // resolution, so no separate CPU resampling pass is needed.
         let pixelsPerBox = 128
 
         let fovWidthMeters = Self.sizeMeters(
@@ -59,20 +57,18 @@ struct StimulusTexture {
                     * fovHeightMeters / gridHeightMeters
             ))
         )
-        let sourceWidth = width * supersamplingFactor
-        let sourceHeight = height * supersamplingFactor
-        let sourceBytesPerRow = sourceWidth * 4
-        var sourcePixels = [UInt8](
+        let bytesPerRow = width * 4
+        var pixels = [UInt8](
             repeating: 0,
-            count: sourceBytesPerRow * sourceHeight
+            count: bytesPerRow * height
         )
-        try sourcePixels.withUnsafeMutableBytes { bytes in
+        try pixels.withUnsafeMutableBytes { bytes in
             guard let context = CGContext(
                 data: bytes.baseAddress,
-                width: sourceWidth,
-                height: sourceHeight,
+                width: width,
+                height: height,
                 bitsPerComponent: 8,
-                bytesPerRow: sourceBytesPerRow,
+                bytesPerRow: bytesPerRow,
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue
                     | CGImageAlphaInfo.premultipliedLast.rawValue
@@ -85,20 +81,20 @@ struct StimulusTexture {
             context.setAllowsFontSmoothing(true)
             context.setShouldSmoothFonts(true)
 
-            let scaleX = CGFloat(sourceWidth) / CGFloat(fovWidthMeters)
-            let scaleY = CGFloat(sourceHeight) / CGFloat(fovHeightMeters)
+            let scaleX = CGFloat(width) / CGFloat(fovWidthMeters)
+            let scaleY = CGFloat(height) / CGFloat(fovHeightMeters)
             let fovRect = CGRect(
                 x: 0,
                 y: 0,
-                width: sourceWidth,
-                height: sourceHeight
+                width: width,
+                height: height
             )
             context.setFillColor(config.fovBackgroundRGB.cgColor)
             context.fill(fovRect)
 
             let gridCenter = CGPoint(
-                x: CGFloat(sourceWidth) / 2,
-                y: CGFloat(sourceHeight) / 2
+                x: CGFloat(width) / 2,
+                y: CGFloat(height) / 2
             )
             let boxWidth = CGFloat(boxWidthMeters) * scaleX
             let boxHeight = CGFloat(boxHeightMeters) * scaleY
@@ -206,33 +202,6 @@ struct StimulusTexture {
             context.setStrokeColor(config.fovBorderRGB.cgColor)
             context.setLineWidth(fovStrokePixels)
             context.stroke(fovRect.insetBy(dx: fovStrokePixels / 2, dy: fovStrokePixels / 2))
-        }
-
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let scaleError = sourcePixels.withUnsafeMutableBytes { sourceBytes in
-            pixels.withUnsafeMutableBytes { destinationBytes in
-                var source = vImage_Buffer(
-                    data: sourceBytes.baseAddress!,
-                    height: vImagePixelCount(sourceHeight),
-                    width: vImagePixelCount(sourceWidth),
-                    rowBytes: sourceBytesPerRow
-                )
-                var destination = vImage_Buffer(
-                    data: destinationBytes.baseAddress!,
-                    height: vImagePixelCount(height),
-                    width: vImagePixelCount(width),
-                    rowBytes: width * 4
-                )
-                return vImageScale_ARGB8888(
-                    &source,
-                    &destination,
-                    nil,
-                    vImage_Flags(kvImageHighQualityResampling)
-                )
-            }
-        }
-        guard scaleError == kvImageNoError else {
-            throw StimulusTextureError.resamplingFailed(scaleError)
         }
 
         Self.applyDisplayModel(display, to: &pixels)
@@ -344,7 +313,6 @@ private extension RGB {
 enum StimulusTextureError: LocalizedError {
     case invalidFont(String)
     case contextCreationFailed
-    case resamplingFailed(vImage_Error)
     case textureCreationFailed
     case mipmapEncodingFailed
 
@@ -354,8 +322,6 @@ enum StimulusTextureError: LocalizedError {
             return "The configured font ‘\(name)’ doesn't provide usable uppercase metrics."
         case .contextCreationFailed:
             return "The app couldn't create the precomposed FOV drawing context."
-        case .resamplingFailed(let error):
-            return "The app couldn't downsample the FOV texture (vImage error \(error))."
         case .textureCreationFailed:
             return "Metal couldn't create the precomposed FOV texture."
         case .mipmapEncodingFailed:

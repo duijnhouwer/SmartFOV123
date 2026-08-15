@@ -16,9 +16,10 @@ struct StimulusCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfigurat
         capabilities: LayerRenderer.Capabilities,
         configuration: inout LayerRenderer.Configuration
     ) {
-        // Let visionOS concentrate rasterization density at the participant's
-        // fixation point, where high-acuity digit reading occurs.
-        let foveationEnabled = capabilities.supportsFoveation
+        // The experiment configuration controls whether visionOS concentrates
+        // rasterization density at the participant's fixation point.
+        let foveationEnabled = appModel.plan?.foveatedRendering == true
+            && capabilities.supportsFoveation
         configuration.isFoveationEnabled = foveationEnabled
 
         if capabilities.supportedDepthFormats.contains(.depth32Float) {

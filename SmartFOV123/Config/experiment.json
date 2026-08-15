@@ -4,6 +4,8 @@
   "subject_number_digit_count": 3,
   "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits, one digit at a time. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nThe next trial begins automatically after a correct response.\n\nThere will be <NUMBEROFTRIALS> trials.",
   "debriefing": "Thank you for your participation!\n\nSpeak \"Quit\" to exit.",
+  "foveated_rendering": true,
+
   "conditions": [
     {
       "name": "master",
@@ -21,7 +23,7 @@
         "width_degrees": 2.0,
         "height_degrees": 2.0,
         "stroke_degrees": 0.1,
-        "fill_rgb": [0.8, 0.8, 0.8],
+        "fill_rgb": [0, 0, 0],
         "stroke_rgb": [0.0, 0.0, 0.0],
         "number_horizontal": 6,
         "number_vertical": 6
@@ -34,7 +36,7 @@
         "height_degrees": 21.21,
         "horizontal_offset_degrees": 0.0,
         "vertical_offset_degrees": 0.0,
-        "background_rgb": [1.0, 1.0, 1.0],
+        "background_rgb": [0.0, 0.0, 0.0],
         "border_stroke_arcmin": 5,
         "border_rgb": [0.0, 0.0, 0.0],
         "distance_meters": 1.5

@@ -175,6 +175,9 @@ struct ExperimentPlan: Sendable {
     let subjectNumberDigitCount: Int
     let instructions: String
     let debriefing: String
+    /// Compositor-layer configuration is fixed for the duration of a session,
+    /// so this option applies consistently to every trial in the plan.
+    let foveatedRendering: Bool
     let trials: [ScheduledTrial]
 
     static func loadBundled() throws -> ExperimentPlan {
@@ -256,6 +259,7 @@ private struct ExperimentFile: Decodable {
     let subjectNumberDigitCount: Int
     let instructions: String
     let debriefing: String
+    let foveatedRendering: Bool
     let conditions: [ConditionDefinition]
 
     private enum CodingKeys: String, CodingKey {
@@ -264,6 +268,7 @@ private struct ExperimentFile: Decodable {
         case subjectNumberDigitCount = "subject_number_digit_count"
         case instructions
         case debriefing
+        case foveatedRendering = "foveated_rendering"
         case conditions
     }
 }
@@ -654,6 +659,7 @@ private enum ConditionResolver {
             subjectNumberDigitCount: file.subjectNumberDigitCount,
             instructions: resolvedInstructions,
             debriefing: debriefing,
+            foveatedRendering: file.foveatedRendering,
             trials: trials
         )
     }
@@ -967,7 +973,7 @@ private enum JSONShapeValidator {
             root,
             allowed: [
                 "schema_version", "protocol_name", "subject_number_digit_count",
-                "instructions", "debriefing", "conditions"
+                "instructions", "debriefing", "foveated_rendering", "conditions"
             ],
             path: "$"
         )
