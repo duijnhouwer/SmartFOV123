@@ -136,6 +136,12 @@ final class SpeechConfirmationListener {
         Self.deactivateAudioSession()
     }
 
+    /// Stops microphone capture but intentionally leaves the play-and-record
+    /// session active long enough for head-locked feedback audio to play.
+    func pauseForFeedback() {
+        stopRecognitionAndAudioInput()
+    }
+
     /// Stops capture and waits until all queued audio-session work has finished.
     /// Immersive spaces use this before dismissal so visionOS cannot tear down a
     /// scene while its microphone session is still being deactivated.
@@ -184,7 +190,7 @@ final class SpeechConfirmationListener {
                 do {
                     let audioSession = AVAudioSession.sharedInstance()
                     try audioSession.setCategory(
-                        .record,
+                        .playAndRecord,
                         mode: .measurement,
                         options: .duckOthers
                     )

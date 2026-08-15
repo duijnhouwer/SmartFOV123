@@ -3,44 +3,38 @@ import AVFoundation
 import Foundation
 
 final class FeedbackSoundPlayer {
-    private var correctSoundID: SystemSoundID?
-    private var wrongSoundID: SystemSoundID?
-    private var popSoundID: SystemSoundID?
+    private let correctPlayer: AVAudioPlayer?
+    private let wrongPlayer: AVAudioPlayer?
+    private let popPlayer: AVAudioPlayer?
 
     init() {
+        // The session-level setting is a fallback for visionOS versions before
+        // per-player spatial experiences became available.
         Self.configureHeadLockedAudio()
-        correctSoundID = Self.loadSound(named: "correct")
-        wrongSoundID = Self.loadSound(named: "wrong")
-        popSoundID = Self.loadSound(named: "pop")
-    }
-
-    deinit {
-        if let correctSoundID {
-            AudioServicesDisposeSystemSoundID(correctSoundID)
-        }
-        if let wrongSoundID {
-            AudioServicesDisposeSystemSoundID(wrongSoundID)
-        }
-        if let popSoundID {
-            AudioServicesDisposeSystemSoundID(popSoundID)
-        }
+        correctPlayer = Self.loadPlayer(named: "correct")
+        wrongPlayer = Self.loadPlayer(named: "wrong")
+        popPlayer = Self.loadPlayer(named: "pop")
     }
 
     func playCorrect() {
-        play(correctSoundID)
+        play(correctPlayer)
     }
 
     func playWrong() {
-        play(wrongSoundID)
+        play(wrongPlayer)
     }
 
     func playPop() {
-        play(popSoundID)
+        play(popPlayer)
     }
 
-    private func play(_ soundID: SystemSoundID?) {
-        guard let soundID else { return }
-        AudioServicesPlaySystemSound(soundID)
+    private func play(_ player: AVAudioPlayer?) {
+        guard let player else { return }
+        player.currentTime = 0
+        guard player.play() else {
+            print("MobiWordFinder audio error: AVAudioPlayer refused to start playback.")
+            return
+        }
     }
 
     private static func configureHeadLockedAudio() {
@@ -57,7 +51,7 @@ final class FeedbackSoundPlayer {
         }
     }
 
-    private static func loadSound(named name: String) -> SystemSoundID? {
+    private static func loadPlayer(named name: String) -> AVAudioPlayer? {
         let url = Bundle.main.url(forResource: name, withExtension: "caf")
             ?? Bundle.main.url(forResource: name, withExtension: "caf", subdirectory: "Config")
         guard let url else {
@@ -65,12 +59,22 @@ final class FeedbackSoundPlayer {
             return nil
         }
 
-        var soundID = SystemSoundID()
-        let status = AudioServicesCreateSystemSoundID(url as CFURL, &soundID)
-        guard status == kAudioServicesNoError else {
-            print("MobiWordFinder audio error: couldn't load \(name).caf (OSStatus \(status)).")
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            if #available(visionOS 26.0, *) {
+                // Apply the fixed experience to the actual playback object.
+                // Unlike AudioServices system sounds, this prevents visionOS
+                // from anchoring feedback to the app's operator window.
+                player.intendedSpatialExperience = .fixed(soundStageSize: .small)
+            }
+            player.prepareToPlay()
+            return player
+        } catch {
+            print(
+                "MobiWordFinder audio error: couldn't load \(name).caf "
+                    + "(\(error.localizedDescription))."
+            )
             return nil
         }
-        return soundID
     }
 }

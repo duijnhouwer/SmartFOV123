@@ -270,7 +270,7 @@ final class AppModel {
             )
         )
 
-        speechListener.stop()
+        speechListener.pauseForFeedback()
         isListening = false
 
         if candidate == experiment.grid.targetNumber {
