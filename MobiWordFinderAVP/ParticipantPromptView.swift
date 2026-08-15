@@ -30,6 +30,15 @@ struct ParticipantPromptView: View {
                         Text(prompt.message)
                             .font(.title2)
                             .lineSpacing(7)
+                            .multilineTextAlignment(
+                                appModel.trialPhase == .instructions ? .leading : .center
+                            )
+                            .frame(
+                                maxWidth: .infinity,
+                                alignment: appModel.trialPhase == .instructions
+                                    ? .leading
+                                    : .center
+                            )
                     }
                     .multilineTextAlignment(.center)
                     .padding(48)

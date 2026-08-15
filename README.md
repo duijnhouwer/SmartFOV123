@@ -1,5 +1,12 @@
 # MobiWordFinderAVP
 
+> **BROKEN — critical audio issue:** Speech recognition can fail when `AVAudioEngine`
+> restarts during immersive-space transitions. The device log reports
+> `Creating proxy session failed`, `Session lookup failed`, and
+> `AUIOClient_StartIO failed`. Do not use this revision for data collection until
+> the audio-session and speech-recognition lifecycle has been repaired and tested
+> on Apple Vision Pro hardware.
+
 A configurable visionOS number-finding experiment rendered independently to either or both eyes over passthrough with Compositor Services and Metal.
 
 The app loads the complete multi-trial plan from `Config/experiment.json` before the experiment starts. Conditions support recursive inheritance, repetitions, fixed or shuffled seeds, and ordered blocks whose trials are randomized internally. Each repetition expands into a uniquely named condition, and the first three-digit number drawn from its seeded random-number generator becomes the target. The participant confirms the target's location by speaking the perpendicular three-digit sequence that crosses its middle digit.

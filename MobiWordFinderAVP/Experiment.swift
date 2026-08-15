@@ -626,10 +626,14 @@ private enum ConditionResolver {
                 configuration: configuration
             )
         }
+        let resolvedInstructions = instructions.replacingOccurrences(
+            of: "<NUMBEROFTRIALS>",
+            with: String(trials.count)
+        )
         return ExperimentPlan(
             protocolName: protocolName,
             subjectNumberDigitCount: file.subjectNumberDigitCount,
-            instructions: instructions,
+            instructions: resolvedInstructions,
             trials: trials
         )
     }
