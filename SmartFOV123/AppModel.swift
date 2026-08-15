@@ -1,6 +1,7 @@
 import Dispatch
 import Darwin
 import SwiftUI
+import UIKit
 
 @MainActor
 @Observable
@@ -12,10 +13,12 @@ final class AppModel {
     }
 
     enum TrialPhase: Equatable {
+        case configurationError
         case participantNumber
         case participantConfirmation
         case instructions
         case debriefing
+        case transitioning
         case targetCue
         case search
     }
@@ -27,7 +30,6 @@ final class AppModel {
     }
 
     let immersiveSpaceID = "SmartFOV123Space"
-    let participantSpaceID = "SmartFOV123ParticipantSpace"
     let plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
@@ -35,21 +37,23 @@ final class AppModel {
     private let speechListener = SpeechConfirmationListener()
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
+    private var backgroundObserverTask: Task<Void, Never>?
     private var instantiatedExperiment: Experiment?
+    private var preparedTrialRevision: Int?
     private var currentTrialMeasurement: InProgressTrialMeasurement?
     private var pendingSubjectNumber: String?
     private var isRetryingSubjectNumber = false
     private var hasExperimentBegun = false
+    private var hasStartedWindowlessExperience = false
+    private var isAdvancingCompletedTrial = false
     private(set) var currentTrialIndex = 0
     private(set) var completedTrialToken = 0
     private(set) var beginExperimentToken = 0
     private(set) var immersivePresentationGeneration = 0
     private(set) var subjectNumber: String?
     private(set) var trialPhase: TrialPhase = .participantNumber
-    private(set) var hasConfigurationError = false
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
-    var recognizedSpeech: String?
     var isListening = false
 
     init() {
@@ -57,7 +61,7 @@ final class AppModel {
             plan = try ExperimentPlan.loadBundled()
         } catch {
             plan = nil
-            hasConfigurationError = true
+            trialPhase = .configurationError
             statusMessage = error.localizedDescription
             print("SmartFOV123 configuration error: \(error.localizedDescription)")
         }
@@ -67,13 +71,24 @@ final class AppModel {
         instantiatedExperiment
     }
 
-    var activeImmersiveSpaceID: String {
+    var showsParticipantInterface: Bool {
         switch trialPhase {
-        case .participantNumber, .participantConfirmation, .instructions, .debriefing:
-            participantSpaceID
-        case .targetCue, .search:
-            immersiveSpaceID
+        case .configurationError, .participantNumber, .participantConfirmation, .instructions, .debriefing:
+            return true
+        case .transitioning, .targetCue, .search:
+            return false
         }
+    }
+
+    var showsStimulus: Bool {
+        trialPhase == .targetCue || trialPhase == .search
+    }
+
+    /// Keeps the persistent compositor renderer prepared during the opening
+    /// dialogs, but prevents it from rebuilding against stale trial data while
+    /// trials transition or after the experiment ends.
+    var shouldRunStimulusRenderer: Bool {
+        stimulusPresentationState.content != .hidden
     }
 
     var trialCount: Int {
@@ -84,25 +99,17 @@ final class AppModel {
         plan != nil && currentTrialIndex >= trialCount
     }
 
-    var trialDescription: String {
-        if subjectNumber == nil {
-            return "Ready to collect the participant number before trial 1."
-        }
-        if hasCompletedExperiment {
-            return "Experiment complete — all \(trialCount) trials have been confirmed."
-        }
-        guard let plan, plan.trials.indices.contains(currentTrialIndex) else {
-            return "No valid experiment is loaded."
-        }
-        let trial = plan.trials[currentTrialIndex]
-        if let experiment {
-            return "Trial \(trial.trialNumber) of \(trialCount), \(trial.conditionName): find \(experiment.grid.targetNumber) in the \(experiment.grid.columns) × \(experiment.grid.rows) grid. Then read the three digits crossing its middle digit, one digit at a time."
-        }
-        return "Trial \(trial.trialNumber) of \(trialCount), \(trial.conditionName). The target and grid will be generated when the trial starts."
-    }
-
     var participantPrompt: ParticipantPrompt? {
         switch trialPhase {
+        case .configurationError:
+            let exitInstruction = isListening
+                ? "Speak “Quit” to exit."
+                : "Use the Digital Crown to leave SmartFOV123."
+            return .init(
+                title: "Configuration Error",
+                message: "\(statusMessage ?? "The experiment configuration is invalid.")\n\n\(exitInstruction)",
+                emphasizedText: nil
+            )
         case .participantNumber:
             let digitCount = plan?.subjectNumberDigitCount ?? 3
             return .init(
@@ -133,7 +140,7 @@ final class AppModel {
                 message: plan.debriefing,
                 emphasizedText: nil
             )
-        case .targetCue, .search:
+        case .transitioning, .targetCue, .search:
             return nil
         }
     }
@@ -148,11 +155,20 @@ final class AppModel {
         instantiatedExperiment = await Task.detached(priority: .userInitiated) {
             scheduledTrial.instantiate()
         }.value
+        if let instantiatedExperiment {
+            preparedTrialRevision = stimulusPresentationState.prepareTrial(
+                experiment: instantiatedExperiment,
+                trialsRemaining: max(0, trialCount - currentTrialIndex)
+            )
+        }
         return true
     }
 
     func prepareImmersivePresentation() {
-        if hasCompletedExperiment {
+        if plan == nil {
+            trialPhase = .configurationError
+            stimulusPresentationState.hide()
+        } else if hasCompletedExperiment {
             trialPhase = .debriefing
             stimulusPresentationState.hide()
         } else if !hasExperimentBegun, subjectNumber == nil {
@@ -167,6 +183,7 @@ final class AppModel {
             trialPhase = .targetCue
             stimulusPresentationState.reset()
         }
+        synchronizeParticipantPresentation()
     }
 
     func markCurrentTrialStartedIfReady() {
@@ -176,6 +193,42 @@ final class AppModel {
 
     func beginImmersivePresentation() {
         immersivePresentationGeneration += 1
+    }
+
+    func beginTrialTransition() {
+        beginImmersivePresentation()
+        trialPhase = .transitioning
+        stimulusPresentationState.hide()
+    }
+
+    func presentPreparedTrial() {
+        beginImmersivePresentation()
+        trialPhase = .targetCue
+        stimulusPresentationState.reset()
+    }
+
+    func showConfigurationError(_ message: String) {
+        beginImmersivePresentation()
+        statusMessage = message
+        trialPhase = .configurationError
+        stimulusPresentationState.hide()
+        synchronizeParticipantPresentation()
+    }
+
+    func startWindowlessExperienceIfNeeded() {
+        guard !hasStartedWindowlessExperience else { return }
+        hasStartedWindowlessExperience = true
+        backgroundObserverTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(
+                named: UIApplication.didEnterBackgroundNotification
+            ) {
+                guard let self else { return }
+                self.terminateResearchApplication()
+            }
+        }
+        Task { @MainActor [weak self] in
+            await self?.startWindowlessExperience()
+        }
     }
 
     func publishImmersiveSpaceState(
@@ -196,6 +249,28 @@ final class AppModel {
         }
     }
 
+    private func startWindowlessExperience() async {
+        immersiveSpaceState = .inTransition
+
+        if plan != nil, !(await prepareCurrentTrial()) {
+            showConfigurationError("No scheduled trial is available.")
+        } else {
+            prepareImmersivePresentation()
+            beginImmersivePresentation()
+        }
+
+        guard await requestSpeechAuthorization() else {
+            showConfigurationError(
+                statusMessage ?? "Microphone and speech-recognition access are required."
+            )
+            immersiveSpaceState = .open
+            return
+        }
+
+        immersiveSpaceState = .open
+        await startSpeechConfirmation()
+    }
+
     func markCurrentTrialStarted() {
         currentTrialMeasurement = .init(startTimeMS: elapsedMilliseconds())
     }
@@ -203,7 +278,6 @@ final class AppModel {
     func startSpeechConfirmation() async {
         speechRestartTask?.cancel()
         speechRestartTask = nil
-        recognizedSpeech = nil
 
         do {
             try await speechListener.start(
@@ -216,6 +290,8 @@ final class AppModel {
             )
             isListening = true
             switch trialPhase {
+            case .configurationError:
+                statusMessage = statusMessage ?? "The experiment configuration is invalid. Speak quit to exit."
             case .participantNumber:
                 statusMessage = "Listening for the three-digit participant number."
             case .participantConfirmation:
@@ -224,6 +300,8 @@ final class AppModel {
                 statusMessage = "Listening for begin or quit."
             case .debriefing:
                 statusMessage = "Debriefing displayed. Listening for quit."
+            case .transitioning:
+                statusMessage = "Preparing the next trial…"
             case .targetCue:
                 statusMessage = "Listening… read the target number shown above the X grid."
             case .search:
@@ -251,14 +329,22 @@ final class AppModel {
     private func handleTranscript(_ transcript: String) {
         guard immersiveSpaceState == .open else { return }
 
-        recognizedSpeech = transcript
-        if trialPhase == .debriefing {
-            handleDebriefingResponse(transcript)
+        let commandWords = transcript
+            .lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+        if commandWords.contains("quit") {
+            terminateResearchApplication()
+        }
+
+        if trialPhase == .configurationError || trialPhase == .debriefing {
             return
         }
 
         guard let experiment else { return }
         switch trialPhase {
+        case .configurationError:
+            return
         case .participantNumber:
             handleParticipantNumber(transcript, experiment: experiment)
             return
@@ -269,6 +355,8 @@ final class AppModel {
             handleInstructionsResponse(transcript)
             return
         case .debriefing:
+            return
+        case .transitioning:
             return
         case .targetCue, .search:
             break
@@ -330,6 +418,7 @@ final class AppModel {
                 )
                 statusMessage = "Correct — heard \(candidate)."
                 completedTrialToken += 1
+                scheduleCompletedTrialAdvance()
             } catch {
                 statusMessage = "Correct response, but trial \(currentTrialIndex + 1) couldn't be saved: \(error.localizedDescription) Say the crossing sequence again to retry."
                 print("SmartFOV123 result error: \(error.localizedDescription)")
@@ -346,20 +435,20 @@ final class AppModel {
         guard let plan, currentTrialIndex < plan.trials.count else { return }
         currentTrialIndex += 1
         instantiatedExperiment = nil
+        preparedTrialRevision = nil
         currentTrialMeasurement = nil
-        stimulusPresentationState.reset()
         if hasCompletedExperiment {
             trialPhase = .debriefing
             stimulusPresentationState.hide()
+            synchronizeParticipantPresentation()
             if let fileURL = resultFileWriter.fileURL {
                 statusMessage = "Experiment complete — all \(trialCount) trials finished. Results: Results/\(fileURL.lastPathComponent)"
             } else {
                 statusMessage = "Experiment complete — all \(trialCount) trials finished."
             }
         } else if plan.trials.indices.contains(currentTrialIndex) {
-            trialPhase = .targetCue
             let trial = plan.trials[currentTrialIndex]
-            statusMessage = "Ready for trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."
+            statusMessage = "Preparing trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."
         }
     }
 
@@ -368,6 +457,8 @@ final class AppModel {
         isListening = false
         if let error {
             statusMessage = "Speech recognition paused: \(error.localizedDescription) Retrying…"
+        } else if trialPhase == .configurationError {
+            statusMessage = "The experiment configuration is invalid. Speak quit to exit."
         } else if trialPhase == .participantConfirmation {
             statusMessage = "I didn't catch yes, no, or quit. Listening again…"
         } else if trialPhase == .instructions {
@@ -398,15 +489,6 @@ final class AppModel {
     }
 
     private func handleParticipantNumber(_ transcript: String, experiment: Experiment) {
-        let words = transcript
-            .lowercased()
-            .split { !$0.isLetter }
-            .map(String.init)
-
-        if words.contains("quit") {
-            terminateResearchApplication()
-        }
-
         guard let plan,
               let candidate = SpokenDigitParser.parseDigits(
             from: transcript,
@@ -419,6 +501,7 @@ final class AppModel {
         pendingSubjectNumber = candidate
         isRetryingSubjectNumber = false
         trialPhase = .participantConfirmation
+        synchronizeParticipantPresentation()
         speechListener.stop()
         isListening = false
         scheduleSpeechRestart(afterNanoseconds: 250_000_000)
@@ -430,14 +513,11 @@ final class AppModel {
             .split { !$0.isLetter }
             .map(String.init)
 
-        if words.contains("quit") {
-            terminateResearchApplication()
-        }
-
         if words.contains("yes"), let pendingSubjectNumber {
             subjectNumber = pendingSubjectNumber
             self.pendingSubjectNumber = nil
             trialPhase = .instructions
+            synchronizeParticipantPresentation()
             speechListener.stop()
             isListening = false
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
@@ -447,6 +527,7 @@ final class AppModel {
         pendingSubjectNumber = nil
         isRetryingSubjectNumber = true
         trialPhase = .participantNumber
+        synchronizeParticipantPresentation()
         speechListener.stop()
         isListening = false
         scheduleSpeechRestart(afterNanoseconds: 250_000_000)
@@ -458,9 +539,6 @@ final class AppModel {
             .split { !$0.isLetter }
             .map(String.init)
 
-        if words.contains("quit") {
-            terminateResearchApplication()
-        }
         guard words.contains("begin"), let subjectNumber, let plan else {
             return
         }
@@ -472,19 +550,77 @@ final class AppModel {
         hasExperimentBegun = true
         speechListener.stop()
         isListening = false
-        trialPhase = .targetCue
-        stimulusPresentationState.reset()
-        beginExperimentToken += 1
+        trialPhase = .transitioning
+        stimulusPresentationState.hide()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.stopSpeechConfirmation()
+            await self.waitForPreparedTrialResources()
+            self.beginImmersivePresentation()
+            self.trialPhase = .targetCue
+            self.stimulusPresentationState.reset()
+            self.beginExperimentToken += 1
+            self.markCurrentTrialStartedIfReady()
+            await self.startSpeechConfirmation()
+        }
     }
 
-    private func handleDebriefingResponse(_ transcript: String) {
-        let words = transcript
-            .lowercased()
-            .split { !$0.isLetter }
-            .map(String.init)
+    private func synchronizeParticipantPresentation() {
+        guard showsParticipantInterface, let prompt = participantPrompt else { return }
+        stimulusPresentationState.showParticipantPrompt(
+            .init(
+                title: prompt.title,
+                message: prompt.message,
+                emphasizedText: prompt.emphasizedText,
+                usesLeadingAlignment: trialPhase == .instructions
+            )
+        )
+    }
 
-        if words.contains("quit") {
-            terminateResearchApplication()
+    private func scheduleCompletedTrialAdvance() {
+        Task { @MainActor [weak self] in
+            await self?.advanceCompletedTrialInPersistentSpace()
+        }
+    }
+
+    private func advanceCompletedTrialInPersistentSpace() async {
+        guard !isAdvancingCompletedTrial,
+              immersiveSpaceState == .open else { return }
+        isAdvancingCompletedTrial = true
+        defer { isAdvancingCompletedTrial = false }
+
+        await stopSpeechConfirmation()
+
+        let finishesExperiment = currentTrialIndex + 1 >= trialCount
+        if !finishesExperiment {
+            beginTrialTransition()
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        advanceAfterCompletedTrial()
+        if hasCompletedExperiment {
+            await startSpeechConfirmation()
+            return
+        }
+
+        guard await prepareCurrentTrial() else {
+            showConfigurationError("The next scheduled trial couldn't be prepared.")
+            await startSpeechConfirmation()
+            return
+        }
+
+        await waitForPreparedTrialResources()
+        presentPreparedTrial()
+        markCurrentTrialStartedIfReady()
+        await startSpeechConfirmation()
+    }
+
+    private func waitForPreparedTrialResources() async {
+        guard let preparedTrialRevision else { return }
+        while !stimulusPresentationState.isTrialReady(revision: preparedTrialRevision) {
+            guard immersiveSpaceState == .open || immersiveSpaceState == .inTransition else { return }
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 

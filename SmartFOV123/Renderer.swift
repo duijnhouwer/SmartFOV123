@@ -82,6 +82,49 @@ private struct StimulusGeometry {
     }
 }
 
+private struct TrialRenderResources: @unchecked Sendable {
+    let revision: Int
+    let experiment: Experiment
+    let geometry: StimulusGeometry
+    let maskedTexture: StimulusTexture
+    let revealedTexture: StimulusTexture
+}
+
+private final class TrialResourceMailbox: @unchecked Sendable {
+    enum Completion {
+        case success(TrialRenderResources)
+        case failure(revision: Int, message: String)
+    }
+
+    private let lock = NSLock()
+    private var loadingRevision: Int?
+    private var completion: Completion?
+
+    func beginLoading(revision: Int) -> Bool {
+        lock.withLock {
+            guard loadingRevision != revision else { return false }
+            loadingRevision = revision
+            completion = nil
+            return true
+        }
+    }
+
+    func finish(_ result: Completion) {
+        lock.withLock {
+            completion = result
+        }
+    }
+
+    func takeCompletion() -> Completion? {
+        lock.withLock {
+            guard let completion else { return nil }
+            self.completion = nil
+            loadingRevision = nil
+            return completion
+        }
+    }
+}
+
 private enum RendererError: LocalizedError {
     case experimentMissing
     case commandQueueCreationFailed
@@ -122,17 +165,20 @@ actor Renderer {
 
     private let layerRenderer: LayerRenderer
     private let appModel: AppModel
-    private let experiment: Experiment
-    private let presentationGeneration: Int
-    private let geometry: StimulusGeometry
+    private var experiment: Experiment?
+    private var geometry: StimulusGeometry?
     private let arSession = ARKitSession()
     private let worldTracking = WorldTrackingProvider()
     private let commandQueue: MTLCommandQueue
     private let visualPipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
-    private let maskedStimulusTexture: StimulusTexture
-    private let revealedStimulusTexture: StimulusTexture
+    private var maskedStimulusTexture: StimulusTexture?
+    private var revealedStimulusTexture: StimulusTexture?
     private let presentationState: StimulusPresentationState
+    private let trialResourceMailbox = TrialResourceMailbox()
+    private var loadedTrialRevision: Int?
+    private var participantPromptTexture: ParticipantPromptTexture?
+    private var lastParticipantPrompt: StimulusPresentationState.Prompt?
     private var loggedProjectionEyes = Set<String>()
     private var lastPublishedState: AppModel.ImmersiveSpaceState?
     private var isWaitingForDeviceTracking = false
@@ -146,37 +192,21 @@ actor Renderer {
 
     init(
         _ layerRenderer: LayerRenderer,
-        appModel: AppModel,
-        experiment: Experiment,
-        trialsRemaining: Int,
-        presentationGeneration: Int
+        appModel: AppModel
     ) throws {
         self.layerRenderer = layerRenderer
         self.appModel = appModel
-        self.experiment = experiment
-        self.presentationGeneration = presentationGeneration
+        self.experiment = nil
         self.presentationState = appModel.stimulusPresentationState
-        self.geometry = StimulusGeometry(configuration: experiment.configuration.stimulus)
+        self.geometry = nil
 
         let device = layerRenderer.device
         guard let commandQueue = device.makeCommandQueue() else {
             throw RendererError.commandQueueCreationFailed
         }
         self.commandQueue = commandQueue
-        self.maskedStimulusTexture = try StimulusTexture(
-            device: device,
-            commandQueue: commandQueue,
-            experiment: experiment,
-            trialsRemaining: trialsRemaining,
-            presentation: .masked
-        )
-        self.revealedStimulusTexture = try StimulusTexture(
-            device: device,
-            commandQueue: commandQueue,
-            experiment: experiment,
-            trialsRemaining: trialsRemaining,
-            presentation: .revealed
-        )
+        self.maskedStimulusTexture = nil
+        self.revealedStimulusTexture = nil
 
         guard let library = device.makeDefaultLibrary() else {
             throw RendererError.shaderLibraryMissing
@@ -252,30 +282,15 @@ actor Renderer {
 
     @MainActor
     static func start(_ layerRenderer: LayerRenderer, appModel: AppModel) {
-        guard let experiment = appModel.experiment else {
-            appModel.statusMessage = RendererError.experimentMissing.localizedDescription
-            return
-        }
-        let trialsRemaining = max(0, appModel.trialCount - appModel.currentTrialIndex)
-        let presentationGeneration = appModel.immersivePresentationGeneration
         Task(executorPreference: RenderTaskExecutor.shared) {
             do {
-                let renderer = try Renderer(
-                    layerRenderer,
-                    appModel: appModel,
-                    experiment: experiment,
-                    trialsRemaining: trialsRemaining,
-                    presentationGeneration: presentationGeneration
-                )
+                let renderer = try Renderer(layerRenderer, appModel: appModel)
                 try await renderer.startARSession()
                 await renderer.renderLoop()
             } catch {
                 await MainActor.run {
                     appModel.statusMessage = error.localizedDescription
-                    appModel.publishImmersiveSpaceState(
-                        .open,
-                        generation: presentationGeneration
-                    )
+                    appModel.immersiveSpaceState = .open
                 }
             }
         }
@@ -302,6 +317,8 @@ actor Renderer {
 
     private func renderLoop() {
         while true {
+            updateTrialResources()
+
             switch layerRenderer.state {
             case .running:
                 publishState(.open)
@@ -311,9 +328,11 @@ actor Renderer {
             case .paused:
                 layerRenderer.waitUntilRunning()
             case .invalidated:
+                arSession.stop()
                 publishState(.closed)
                 return
             @unknown default:
+                arSession.stop()
                 publishState(.closed)
                 return
             }
@@ -324,10 +343,73 @@ actor Renderer {
         guard lastPublishedState != state else { return }
         lastPublishedState = state
         Task { @MainActor in
-            appModel.publishImmersiveSpaceState(
-                state,
-                generation: presentationGeneration
-            )
+            appModel.immersiveSpaceState = state
+        }
+    }
+
+    private func updateTrialResources() {
+        if let completion = trialResourceMailbox.takeCompletion() {
+            switch completion {
+            case .success(let resources):
+                experiment = resources.experiment
+                geometry = resources.geometry
+                maskedStimulusTexture = resources.maskedTexture
+                revealedStimulusTexture = resources.revealedTexture
+                loadedTrialRevision = resources.revision
+                loggedProjectionEyes.removeAll()
+                presentationState.markTrialReady(revision: resources.revision)
+            case .failure(let revision, let message):
+                loadedTrialRevision = revision
+                presentationState.markTrialReady(revision: revision)
+                Task { @MainActor in
+                    appModel.showConfigurationError(message)
+                }
+            }
+        }
+
+        guard let request = presentationState.trialRequest,
+              request.revision != loadedTrialRevision,
+              trialResourceMailbox.beginLoading(revision: request.revision) else {
+            return
+        }
+
+        let device = layerRenderer.device
+        let mailbox = trialResourceMailbox
+        Task.detached(priority: .userInitiated) {
+            do {
+                guard let textureCommandQueue = device.makeCommandQueue() else {
+                    throw RendererError.commandQueueCreationFailed
+                }
+                let resources = try TrialRenderResources(
+                    revision: request.revision,
+                    experiment: request.experiment,
+                    geometry: StimulusGeometry(
+                        configuration: request.experiment.configuration.stimulus
+                    ),
+                    maskedTexture: StimulusTexture(
+                        device: device,
+                        commandQueue: textureCommandQueue,
+                        experiment: request.experiment,
+                        trialsRemaining: request.trialsRemaining,
+                        presentation: .masked
+                    ),
+                    revealedTexture: StimulusTexture(
+                        device: device,
+                        commandQueue: textureCommandQueue,
+                        experiment: request.experiment,
+                        trialsRemaining: request.trialsRemaining,
+                        presentation: .revealed
+                    )
+                )
+                mailbox.finish(.success(resources))
+            } catch {
+                mailbox.finish(
+                    .failure(
+                        revision: request.revision,
+                        message: "The next trial couldn't be rendered: \(error.localizedDescription)"
+                    )
+                )
+            }
         }
     }
 
@@ -385,23 +467,60 @@ actor Renderer {
         }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
         commandBuffer.label = "SmartFOV123 frame"
-        let stimulusTexture: MTLTexture
+        let surfaceTexture: MTLTexture?
         let presentationContent = presentationState.content
-        let rendersStimulus: Bool
+        let rendersSurface: Bool
+        let rendersBinocularly: Bool
+        let surfaceCenter: SIMD2<Float>
+        let surfaceHalfSize: SIMD2<Float>
+        let surfaceDistance: Float
         switch presentationContent {
         case .hidden:
-            stimulusTexture = maskedStimulusTexture.texture
-            rendersStimulus = false
+            surfaceTexture = maskedStimulusTexture?.texture
+            rendersSurface = false
+            rendersBinocularly = false
+            surfaceCenter = geometry?.fovCenterMeters ?? .zero
+            surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
+            surfaceDistance = geometry?.distanceMeters ?? 1.5
+        case .participantPrompt(let prompt):
+            if prompt != lastParticipantPrompt || participantPromptTexture == nil {
+                do {
+                    participantPromptTexture = try ParticipantPromptTexture(
+                        device: layerRenderer.device,
+                        commandQueue: commandQueue,
+                        prompt: prompt
+                    )
+                    lastParticipantPrompt = prompt
+                } catch {
+                    publishError("The participant dialog couldn't be rendered: \(error.localizedDescription)")
+                }
+            }
+            surfaceTexture = participantPromptTexture?.texture
+            rendersSurface = participantPromptTexture != nil
+            rendersBinocularly = true
+            surfaceCenter = .zero
+            surfaceHalfSize = SIMD2<Float>(0.465, 0.332)
+            surfaceDistance = 1.5
         case .maskedGrid:
-            stimulusTexture = maskedStimulusTexture.texture
-            rendersStimulus = true
+            surfaceTexture = maskedStimulusTexture?.texture
+            rendersSurface = maskedStimulusTexture != nil && geometry != nil
+            rendersBinocularly = false
+            surfaceCenter = geometry?.fovCenterMeters ?? .zero
+            surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
+            surfaceDistance = geometry?.distanceMeters ?? 1.5
         case .revealedGrid:
-            stimulusTexture = revealedStimulusTexture.texture
-            rendersStimulus = true
+            surfaceTexture = revealedStimulusTexture?.texture
+            rendersSurface = revealedStimulusTexture != nil && geometry != nil
+            rendersBinocularly = false
+            surfaceCenter = geometry?.fovCenterMeters ?? .zero
+            surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
+            surfaceDistance = geometry?.distanceMeters ?? 1.5
         }
 
         #if !targetEnvironment(simulator)
-        residencySet.addAllocation(stimulusTexture)
+        if let surfaceTexture {
+            residencySet.addAllocation(surfaceTexture)
+        }
         for drawable in drawables {
             for texture in drawable.colorTextures {
                 residencySet.addAllocation(texture)
@@ -427,8 +546,12 @@ actor Renderer {
             render(
                 drawable,
                 into: commandBuffer,
-                stimulusTexture: stimulusTexture,
-                rendersStimulus: rendersStimulus
+                surfaceTexture: surfaceTexture,
+                rendersSurface: rendersSurface,
+                rendersBinocularly: rendersBinocularly,
+                surfaceCenter: surfaceCenter,
+                surfaceHalfSize: surfaceHalfSize,
+                surfaceDistance: surfaceDistance
             )
             drawable.encodePresent(commandBuffer: commandBuffer)
         }
@@ -445,8 +568,12 @@ actor Renderer {
     private func render(
         _ drawable: LayerRenderer.Drawable,
         into commandBuffer: MTLCommandBuffer,
-        stimulusTexture: MTLTexture,
-        rendersStimulus: Bool
+        surfaceTexture: MTLTexture?,
+        rendersSurface: Bool,
+        rendersBinocularly: Bool,
+        surfaceCenter: SIMD2<Float>,
+        surfaceHalfSize: SIMD2<Float>,
+        surfaceDistance: Float
     ) {
         for (viewIndex, view) in drawable.views.enumerated() {
             let textureMap = view.textureMap
@@ -480,7 +607,9 @@ actor Renderer {
             encoder.setViewport(textureMap.viewport)
             encoder.setRenderPipelineState(visualPipelineState)
             encoder.setDepthStencilState(depthState)
-            encoder.setFragmentTexture(stimulusTexture, index: 0)
+            if let surfaceTexture {
+                encoder.setFragmentTexture(surfaceTexture, index: 0)
+            }
 
             let clipFromDevice = drawable.computeProjection(viewIndex: viewIndex) * view.transform.inverse
             logProjectionMetricsIfNeeded(
@@ -489,9 +618,17 @@ actor Renderer {
                 clipFromDevice: clipFromDevice,
                 viewport: textureMap.viewport
             )
-            if rendersStimulus,
-               shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform) {
-                drawStimulus(encoder: encoder, clipFromDevice: clipFromDevice)
+            if surfaceTexture != nil,
+               rendersSurface,
+               (rendersBinocularly
+                    || shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform)) {
+                drawTexturedQuad(
+                    encoder: encoder,
+                    clipFromDevice: clipFromDevice,
+                    center: surfaceCenter,
+                    halfSize: surfaceHalfSize,
+                    distance: surfaceDistance
+                )
             }
             encoder.endEncoding()
         }
@@ -501,6 +638,7 @@ actor Renderer {
         viewIndex: Int,
         viewTransform: simd_float4x4
     ) -> Bool {
+        guard let experiment else { return false }
         let configuredEye = experiment.configuration.stimulus.eye
         guard configuredEye != .both else { return true }
         return configuredEye == renderedEye(viewIndex: viewIndex, viewTransform: viewTransform)
@@ -535,6 +673,7 @@ actor Renderer {
         ).rawValue
         guard loggedProjectionEyes.insert(eyeLabel).inserted else { return }
 
+        guard let geometry, let experiment else { return }
         let halfHeight = geometry.digitHeightMeters / 2
         let bottom = clipFromDevice * SIMD4<Float>(
             geometry.gridCenterMeters.x,
@@ -564,31 +703,20 @@ actor Renderer {
         )
     }
 
-    private func drawStimulus(
-        encoder: MTLRenderCommandEncoder,
-        clipFromDevice: simd_float4x4
-    ) {
-        drawTexturedQuad(
-            encoder: encoder,
-            clipFromDevice: clipFromDevice,
-            center: geometry.fovCenterMeters,
-            halfSize: geometry.fovHalfSizeMeters
-        )
-    }
-
     private func drawTexturedQuad(
         encoder: MTLRenderCommandEncoder,
         clipFromDevice: simd_float4x4,
         center: SIMD2<Float>,
-        halfSize: SIMD2<Float>
+        halfSize: SIMD2<Float>,
+        distance: Float
     ) {
         var uniforms = StimulusUniforms(
             clipFromDevice: clipFromDevice,
             centerMeters: center,
             halfSizeMeters: halfSize,
-            fovCenterMeters: geometry.fovCenterMeters,
-            fovHalfSizeMeters: geometry.fovHalfSizeMeters,
-            distanceMeters: geometry.distanceMeters
+            fovCenterMeters: center,
+            fovHalfSizeMeters: halfSize,
+            distanceMeters: distance
         )
         encoder.setVertexBytes(
             &uniforms,

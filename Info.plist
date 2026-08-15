@@ -24,10 +24,22 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>UIApplicationPreferredDefaultSceneSessionRole</key>
+	<string>CPSceneSessionRoleImmersiveSpaceApplication</string>
 	<key>UIApplicationSceneManifest</key>
-    <dict>
-        <key>UIApplicationSupportsMultipleScenes</key>
-        <true/>
-    </dict>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPSceneSessionRoleImmersiveSpaceApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>SmartFOV123 Immersive Experience</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>

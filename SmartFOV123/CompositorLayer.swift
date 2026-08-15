@@ -7,6 +7,7 @@ struct StimulusCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfigurat
 
     var body: some ImmersiveSpaceContent {
         CompositorLayer(configuration: self) { @MainActor layerRenderer in
+            appModel.startWindowlessExperienceIfNeeded()
             Renderer.start(layerRenderer, appModel: appModel)
         }
     }
