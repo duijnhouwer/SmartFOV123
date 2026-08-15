@@ -4,6 +4,7 @@ struct LauncherView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @State private var hasAttemptedAutomaticStart = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -50,6 +51,14 @@ struct LauncherView: View {
             }
         }
         .padding(40)
+        .task {
+            guard !hasAttemptedAutomaticStart else { return }
+            hasAttemptedAutomaticStart = true
+            guard appModel.immersiveSpaceState == .closed,
+                  appModel.plan != nil,
+                  !appModel.hasCompletedExperiment else { return }
+            await startTest()
+        }
         .onDisappear {
             Task { @MainActor in
                 guard appModel.immersiveSpaceState == .open else { return }
