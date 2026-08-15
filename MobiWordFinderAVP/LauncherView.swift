@@ -60,9 +60,7 @@ struct LauncherView: View {
                 guard appModel.immersiveSpaceState == .open else { return }
                 await stopTest(message: nil)
                 appModel.advanceAfterCompletedTrial()
-                if !appModel.hasCompletedExperiment {
-                    await startTest()
-                }
+                await startTest()
             }
         }
         .onChange(of: appModel.beginExperimentToken) { _, _ in
@@ -80,6 +78,8 @@ struct LauncherView: View {
             return "Listening for yes, no, or quit"
         case .instructions:
             return "Listening for begin or quit"
+        case .debriefing:
+            return "Listening for quit"
         case .participantNumber, .targetCue, .search:
             return "Listening for digits"
         }
@@ -88,11 +88,15 @@ struct LauncherView: View {
     @MainActor
     private func startTest() async {
         appModel.immersiveSpaceState = .inTransition
-        appModel.statusMessage = "Generating a valid trial grid…"
-        guard await appModel.prepareCurrentTrial() else {
-            appModel.immersiveSpaceState = .closed
-            appModel.statusMessage = "No scheduled trial is available."
-            return
+        if appModel.hasCompletedExperiment {
+            appModel.statusMessage = "Opening the participant debriefing…"
+        } else {
+            appModel.statusMessage = "Generating a valid trial grid…"
+            guard await appModel.prepareCurrentTrial() else {
+                appModel.immersiveSpaceState = .closed
+                appModel.statusMessage = "No scheduled trial is available."
+                return
+            }
         }
         appModel.statusMessage = "Requesting microphone and speech-recognition access…"
 

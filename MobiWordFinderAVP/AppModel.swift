@@ -15,6 +15,7 @@ final class AppModel {
         case participantNumber
         case participantConfirmation
         case instructions
+        case debriefing
         case targetCue
         case search
     }
@@ -68,7 +69,7 @@ final class AppModel {
 
     var activeImmersiveSpaceID: String {
         switch trialPhase {
-        case .participantNumber, .participantConfirmation, .instructions:
+        case .participantNumber, .participantConfirmation, .instructions, .debriefing:
             participantSpaceID
         case .targetCue, .search:
             immersiveSpaceID
@@ -125,6 +126,13 @@ final class AppModel {
                 message: "\(plan.instructions)\n\nReady to start?\nSpeak: “Begin” or “Quit”",
                 emphasizedText: nil
             )
+        case .debriefing:
+            guard let plan else { return nil }
+            return .init(
+                title: "Experiment Complete",
+                message: plan.debriefing,
+                emphasizedText: nil
+            )
         case .targetCue, .search:
             return nil
         }
@@ -144,7 +152,10 @@ final class AppModel {
     }
 
     func prepareImmersivePresentation() {
-        if !hasExperimentBegun, subjectNumber == nil {
+        if hasCompletedExperiment {
+            trialPhase = .debriefing
+            stimulusPresentationState.hide()
+        } else if !hasExperimentBegun, subjectNumber == nil {
             pendingSubjectNumber = nil
             isRetryingSubjectNumber = false
             trialPhase = .participantNumber
@@ -211,6 +222,8 @@ final class AppModel {
                 statusMessage = "Listening for yes, no, or quit."
             case .instructions:
                 statusMessage = "Listening for begin or quit."
+            case .debriefing:
+                statusMessage = "Debriefing displayed. Listening for quit."
             case .targetCue:
                 statusMessage = "Listening… read the target number shown above the X grid."
             case .search:
@@ -236,10 +249,15 @@ final class AppModel {
     }
 
     private func handleTranscript(_ transcript: String) {
-        guard immersiveSpaceState == .open,
-              let experiment else { return }
+        guard immersiveSpaceState == .open else { return }
 
         recognizedSpeech = transcript
+        if trialPhase == .debriefing {
+            handleDebriefingResponse(transcript)
+            return
+        }
+
+        guard let experiment else { return }
         switch trialPhase {
         case .participantNumber:
             handleParticipantNumber(transcript, experiment: experiment)
@@ -249,6 +267,8 @@ final class AppModel {
             return
         case .instructions:
             handleInstructionsResponse(transcript)
+            return
+        case .debriefing:
             return
         case .targetCue, .search:
             break
@@ -327,15 +347,17 @@ final class AppModel {
         currentTrialIndex += 1
         instantiatedExperiment = nil
         currentTrialMeasurement = nil
-        trialPhase = .targetCue
         stimulusPresentationState.reset()
         if hasCompletedExperiment {
+            trialPhase = .debriefing
+            stimulusPresentationState.hide()
             if let fileURL = resultFileWriter.fileURL {
                 statusMessage = "Experiment complete — all \(trialCount) trials finished. Results: Results/\(fileURL.lastPathComponent)"
             } else {
                 statusMessage = "Experiment complete — all \(trialCount) trials finished."
             }
         } else if plan.trials.indices.contains(currentTrialIndex) {
+            trialPhase = .targetCue
             let trial = plan.trials[currentTrialIndex]
             statusMessage = "Ready for trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."
         }
@@ -350,6 +372,8 @@ final class AppModel {
             statusMessage = "I didn't catch yes, no, or quit. Listening again…"
         } else if trialPhase == .instructions {
             statusMessage = "I didn't catch begin or quit. Listening again…"
+        } else if trialPhase == .debriefing {
+            statusMessage = "I didn't catch quit. Listening again…"
         } else {
             statusMessage = "I didn't catch three digits. Listening again…"
         }
@@ -451,6 +475,17 @@ final class AppModel {
         trialPhase = .targetCue
         stimulusPresentationState.reset()
         beginExperimentToken += 1
+    }
+
+    private func handleDebriefingResponse(_ transcript: String) {
+        let words = transcript
+            .lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+
+        if words.contains("quit") {
+            terminateResearchApplication()
+        }
     }
 
     func terminateResearchApplication() -> Never {

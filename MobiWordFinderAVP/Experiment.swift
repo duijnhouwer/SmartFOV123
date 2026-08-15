@@ -174,6 +174,7 @@ struct ExperimentPlan: Sendable {
     let protocolName: String
     let subjectNumberDigitCount: Int
     let instructions: String
+    let debriefing: String
     let trials: [ScheduledTrial]
 
     static func loadBundled() throws -> ExperimentPlan {
@@ -254,6 +255,7 @@ private struct ExperimentFile: Decodable {
     let protocolName: String
     let subjectNumberDigitCount: Int
     let instructions: String
+    let debriefing: String
     let conditions: [ConditionDefinition]
 
     private enum CodingKeys: String, CodingKey {
@@ -261,6 +263,7 @@ private struct ExperimentFile: Decodable {
         case protocolName = "protocol_name"
         case subjectNumberDigitCount = "subject_number_digit_count"
         case instructions
+        case debriefing
         case conditions
     }
 }
@@ -534,6 +537,12 @@ private enum ConditionResolver {
                 "instructions must be nonempty and have no leading or trailing whitespace."
             )
         }
+        let debriefing = file.debriefing.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !debriefing.isEmpty, debriefing == file.debriefing else {
+            throw ExperimentError.invalidConfiguration(
+                "debriefing must be nonempty and have no leading or trailing whitespace."
+            )
+        }
 
         try validateDefinitionNames(file.conditions)
         try validateMaster(file.conditions[0])
@@ -626,14 +635,25 @@ private enum ConditionResolver {
                 configuration: configuration
             )
         }
-        let resolvedInstructions = instructions.replacingOccurrences(
-            of: "<NUMBEROFTRIALS>",
-            with: String(trials.count)
-        )
+        let gridSizes = Set(trials.map { trial in
+            let stimulus = trial.configuration.stimulus
+            return "\(stimulus.numberOfDigitBoxesHorizontal)x\(stimulus.numberOfDigitBoxesVertical)"
+        })
+        let gridSizeDescription = gridSizes.sorted().joined(separator: " or ")
+        let resolvedInstructions = instructions
+            .replacingOccurrences(
+                of: "<NUMBEROFTRIALS>",
+                with: String(trials.count)
+            )
+            .replacingOccurrences(
+                of: "<GRIDSIZE>",
+                with: gridSizeDescription
+            )
         return ExperimentPlan(
             protocolName: protocolName,
             subjectNumberDigitCount: file.subjectNumberDigitCount,
             instructions: resolvedInstructions,
+            debriefing: debriefing,
             trials: trials
         )
     }
@@ -947,7 +967,7 @@ private enum JSONShapeValidator {
             root,
             allowed: [
                 "schema_version", "protocol_name", "subject_number_digit_count",
-                "instructions", "conditions"
+                "instructions", "debriefing", "conditions"
             ],
             path: "$"
         )

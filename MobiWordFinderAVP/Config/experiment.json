@@ -2,7 +2,8 @@
   "schema_version": 5,
   "protocol_name": "example",
   "subject_number_digit_count": 3,
-  "instructions": "You will be looking for three-digit numbers hiding in a 8x8 grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit, one digit at a time.\n\nThe next trial begins automatically after a correct response.\n\nThere will be <NUMBEROFTRIALS> trials.",
+  "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit, one digit at a time.\n\nThe next trial begins automatically after a correct response.\n\nThere will be <NUMBEROFTRIALS> trials.",
+  "debriefing": "Thank you for your participation!\n\nSpeak \"Quit\" to exit.",
   "conditions": [
     {
       "name": "master",
