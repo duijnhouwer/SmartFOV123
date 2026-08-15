@@ -47,18 +47,13 @@ struct LauncherView: View {
             await startTest()
         }
         .onDisappear {
-            guard appModel.immersiveSpaceState == .open else { return }
-            // Remove the stimulus synchronously. The window's environment can
-            // disappear before its asynchronous immersive-space dismissal has
-            // completed, but the participant must never be left viewing it.
-            appModel.stimulusPresentationState.hide()
-            appModel.immersiveSpaceState = .inTransition
-            Task { @MainActor in
-                await dismissImmersiveSpace()
-                await appModel.stopSpeechConfirmation()
-                appModel.immersiveSpaceState = .closed
-                appModel.statusMessage = nil
-            }
+            // Apple doesn't normally recommend terminating an application in
+            // response to a window closing. This is a privately deployed
+            // research app, however, and closing its sole visible operator
+            // window explicitly means "end the session." Terminating here is
+            // synchronous, so no immersive stimulus or onboarding prompt can
+            // become stranded by cancellation of an asynchronous Task.
+            appModel.terminateResearchApplication()
         }
         .onChange(of: appModel.completedTrialToken) { _, _ in
             Task { @MainActor in

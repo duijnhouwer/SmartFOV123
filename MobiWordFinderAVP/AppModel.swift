@@ -107,8 +107,8 @@ final class AppModel {
             return .init(
                 title: isRetryingSubjectNumber ? "Please try again" : "Welcome!",
                 message: isRetryingSubjectNumber
-                    ? "Please state your \(digitCount)-digit number, one digit at a time."
-                    : "Please state your \(digitCount)-digit participant number.",
+                    ? "Please state your \(digitCount)-digit number, one digit at a time.\n\nSpeak “Quit” to exit."
+                    : "Please state your \(digitCount)-digit participant number.\n\nSpeak “Quit” to exit.",
                 emphasizedText: nil
             )
         case .participantConfirmation:
@@ -374,6 +374,15 @@ final class AppModel {
     }
 
     private func handleParticipantNumber(_ transcript: String, experiment: Experiment) {
+        let words = transcript
+            .lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+
+        if words.contains("quit") {
+            terminateResearchApplication()
+        }
+
         guard let plan,
               let candidate = SpokenDigitParser.parseDigits(
             from: transcript,
@@ -398,7 +407,7 @@ final class AppModel {
             .map(String.init)
 
         if words.contains("quit") {
-            requestQuit()
+            terminateResearchApplication()
         }
 
         if words.contains("yes"), let pendingSubjectNumber {
@@ -426,7 +435,7 @@ final class AppModel {
             .map(String.init)
 
         if words.contains("quit") {
-            requestQuit()
+            terminateResearchApplication()
         }
         guard words.contains("begin"), let subjectNumber, let plan else {
             return
@@ -444,9 +453,11 @@ final class AppModel {
         beginExperimentToken += 1
     }
 
-    private func requestQuit() -> Never {
+    func terminateResearchApplication() -> Never {
         speechListener.stop()
         isListening = false
+        speechRestartTask?.cancel()
+        stimulusPresentationState.hide()
 
         // Apple intentionally doesn't provide a supported API for a visionOS
         // app to terminate itself, and calling exit() is not considered good

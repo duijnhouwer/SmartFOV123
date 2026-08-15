@@ -73,14 +73,14 @@
       "name": "__condition_nr__",
       "inherits": "fov_30_right",
       "block_nr": 1,
-      "repeats": 10,
+      "repeats": 2,
       "random_seed": "shuffle"
     },
     {
       "name": "__condition_nr__",
       "inherits": "fov_30_both",
       "block_nr": 1,
-      "repeats": 10,
+      "repeats": 2,
       "random_seed": "shuffle"
     }
   ]
