@@ -16,9 +16,9 @@ struct StimulusCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfigurat
         capabilities: LayerRenderer.Capabilities,
         configuration: inout LayerRenderer.Configuration
     ) {
-        // The experiment configuration controls whether visionOS concentrates
-        // rasterization density at the participant's fixation point.
-        let foveationEnabled = appModel.plan?.foveatedRendering == true
+        // Request foveation by default. A protocol can explicitly disable it
+        // with foveated_rendering: false.
+        let foveationEnabled = appModel.plan?.foveatedRendering != false
             && capabilities.supportsFoveation
         configuration.isFoveationEnabled = foveationEnabled
 

@@ -79,7 +79,7 @@ struct StimulusTexture {
                 height: height,
                 bitsPerComponent: 8,
                 bytesPerRow: bytesPerRow,
-                space: CGColorSpaceCreateDeviceRGB(),
+                space: RGB.sRGBColorSpace,
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue
                     | CGImageAlphaInfo.premultipliedLast.rawValue
             ) else {
@@ -88,8 +88,10 @@ struct StimulusTexture {
 
             context.setAllowsAntialiasing(true)
             context.setShouldAntialias(true)
-            context.setAllowsFontSmoothing(true)
-            context.setShouldSmoothFonts(true)
+            // Keep grayscale edge antialiasing, but avoid RGB subpixel font
+            // smoothing, which can alter the apparent hue of colored glyphs.
+            context.setAllowsFontSmoothing(false)
+            context.setShouldSmoothFonts(false)
 
             let scaleX = CGFloat(width) / CGFloat(fovWidthMeters)
             let scaleY = CGFloat(height) / CGFloat(fovHeightMeters)
@@ -248,7 +250,7 @@ struct StimulusTexture {
         Self.applyDisplayModel(display, to: &pixels)
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm,
+            pixelFormat: .rgba8Unorm_srgb,
             width: width,
             height: height,
             mipmapped: true
@@ -346,8 +348,13 @@ struct StimulusTexture {
 }
 
 private extension RGB {
+    static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+
     var cgColor: CGColor {
-        CGColor(red: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: 1)
+        CGColor(
+            colorSpace: Self.sRGBColorSpace,
+            components: [CGFloat(red), CGFloat(green), CGFloat(blue), 1]
+        )!
     }
 }
 

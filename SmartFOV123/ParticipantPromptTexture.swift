@@ -26,7 +26,7 @@ struct ParticipantPromptTexture {
                 height: height,
                 bitsPerComponent: 8,
                 bytesPerRow: bytesPerRow,
-                space: CGColorSpaceCreateDeviceRGB(),
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue
                     | CGImageAlphaInfo.premultipliedLast.rawValue
             ) else {
@@ -86,7 +86,7 @@ struct ParticipantPromptTexture {
         }
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm,
+            pixelFormat: .rgba8Unorm_srgb,
             width: width,
             height: height,
             mipmapped: true

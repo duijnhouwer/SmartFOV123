@@ -263,7 +263,7 @@ private struct ExperimentFile: Decodable {
     let subjectNumberDigitCount: Int
     let instructions: String
     let debriefing: String
-    let foveatedRendering: Bool
+    let foveatedRendering: Bool?
     let conditions: [ConditionDefinition]
 
     private enum CodingKeys: String, CodingKey {
@@ -691,7 +691,7 @@ private enum ConditionResolver {
             subjectNumberDigitCount: file.subjectNumberDigitCount,
             instructions: resolvedInstructions,
             debriefing: debriefing,
-            foveatedRendering: file.foveatedRendering,
+            foveatedRendering: file.foveatedRendering ?? true,
             trials: trials
         )
     }
@@ -903,9 +903,17 @@ private enum ConditionResolver {
         }
         let spaceAboveCenteredGrid = (fovHeight - gridHeight) / 2
         guard spaceAboveCenteredGrid >= digitHeight * 1.5 else {
+            let targetCueClearance = digitHeight * 1.5
+            let minimumFOVHeight = gridHeight + targetCueClearance * 2
             throw invalid(
                 definitionName,
-                "the FOV needs at least 1.5 digit heights above the centered grid for the target cue."
+                String(
+                    format: "fov.height_degrees %.2f° leaves %.2f° above the centered tile grid, but the target cue needs %.2f°. Increase fov.height_degrees to at least %.2f°, reduce the tile grid, or reduce digits.height_degrees.",
+                    fovHeight,
+                    spaceAboveCenteredGrid,
+                    targetCueClearance,
+                    minimumFOVHeight
+                )
             )
         }
         guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

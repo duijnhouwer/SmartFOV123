@@ -14,24 +14,24 @@
       "repeats": 0,
       "random_seed": null,
       "digits": {
-        "height_degrees": 1.2,
+        "height_degrees": 1.0,
         "font_name": "Arial",
-        "rgb": [0.2, 0.2, 0.2],
+        "rgb": [1, 0, 0],
         "random_method": "flat_distribution"
       },
       "fov": {
         "eye": "right",
         "mode": "optical_see_through_simulation",
-        "peak_opacity": 0.35,
-        "width_degrees": 21.21,
-        "height_degrees": 21.21,
+        "peak_opacity": 1.00,
+        "width_degrees": 14.14,
+        "height_degrees": 14.14,
         "horizontal_offset_degrees": 0.0,
         "vertical_offset_degrees": 0.0,
         "distance_meters": 1.5
       },
       "tiles": {
-        "width_degrees": 2.0,
-        "height_degrees": 2.0,
+        "width_degrees": 1.5,
+        "height_degrees": 1.5,
         "gutter_degrees": 0.2,
         "corner_radius_degrees": 0.3,
         "fill_rgb": [1, 1, 1],
@@ -66,8 +66,8 @@
       "inherits": "master",
       "fov": {
         "eye": "right",
-        "width_degrees": 21.21,
-        "height_degrees": 21.21
+        "width_degrees": 14.14,
+        "height_degrees": 14.14
       }
     },
     {
