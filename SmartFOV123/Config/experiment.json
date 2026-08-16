@@ -2,7 +2,7 @@
   "schema_version": 5,
   "protocol_name": "example",
   "subject_number_digit_count": 3,
-  "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits, one digit at a time. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nThe next trial begins automatically after a correct response.\n\nThere will be <NUMBEROFTRIALS> trials.",
+  "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nNumbers must be spoken one digit at time.\n\nThe next trial begins automatically after a correct response.\n\nThere will be <NUMBEROFTRIALS> trials.",
   "debriefing": "Thank you for your participation!\n\nPress the Digital Crown to return to Home View.",
   "foveated_rendering": true,
 
@@ -14,7 +14,7 @@
       "repeats": 0,
       "random_seed": null,
       "digits": {
-        "height_degrees": 1.0,
+        "height_degrees": 0.7,
         "font_name": "Arial",
         "rgb": [1, 0, 0],
         "random_method": "flat_distribution"
@@ -22,7 +22,7 @@
       "fov": {
         "eye": "right",
         "mode": "optical_see_through_simulation",
-        "peak_opacity": 1.00,
+        "peak_opacity": 0.35,
         "width_degrees": 14.14,
         "height_degrees": 14.14,
         "horizontal_offset_degrees": 0.0,
@@ -30,14 +30,14 @@
         "distance_meters": 1.5
       },
       "tiles": {
-        "width_degrees": 1.5,
-        "height_degrees": 1.5,
+        "width_degrees": 1.2,
+        "height_degrees": 1.2,
         "gutter_degrees": 0.2,
         "corner_radius_degrees": 0.3,
         "fill_rgb": [1, 1, 1],
         "gutter_rgb": [0, 0, 0],
-        "number_horizontal": 6,
-        "number_vertical": 6
+        "number_horizontal": 7,
+        "number_vertical": 7
       },
       "surround": {
         "fill_rgb": [1.0, 1.0, 1.0],
