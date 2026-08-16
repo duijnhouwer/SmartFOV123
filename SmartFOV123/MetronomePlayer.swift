@@ -30,8 +30,9 @@ final class MetronomePlayer {
             audioState.tockPlayer = audioState.tockPlayer ?? Self.loadPlayer(named: "tock")
             audioState.gongPlayer = audioState.gongPlayer ?? Self.loadPlayer(named: "gong")
             guard audioState.tickPlayer != nil, audioState.tockPlayer != nil else { return }
-            audioState.tickPlayer?.volume = volume
-            audioState.tockPlayer?.volume = volume
+            let playbackVolume = Self.playbackVolume(for: volume)
+            audioState.tickPlayer?.volume = playbackVolume
+            audioState.tockPlayer?.volume = playbackVolume
             let start = DispatchTime.now().uptimeNanoseconds
             self.scheduleBeat(
                 generation: generation,
@@ -162,5 +163,14 @@ final class MetronomePlayer {
             )
             return nil
         }
+    }
+
+    /// AVAudioPlayer volume is linear amplitude, which bunches perceived
+    /// loudness changes near the top of a 0...1 control. A squared fader curve
+    /// keeps exact silence/full scale while making intermediate settings sound
+    /// closer to evenly spaced.
+    private static func playbackVolume(for configuredVolume: Float) -> Float {
+        let clamped = min(max(configuredVolume, 0), 1)
+        return clamped * clamped
     }
 }

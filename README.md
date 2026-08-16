@@ -28,7 +28,7 @@ Schema version 6 uses snake_case property names and enum values. The root protoc
 - One unsigned integer, reused for every repetition.
 - An unsigned-integer array whose length must equal `repeats`.
 
-Negative `timer.metronome.start_seconds` values disable their paired BPM stages; setting every start negative suppresses the metronome. `timer.metronome.volume` scales the peak-normalized tick and tock assets from silence (`0`) through full amplitude (`1`). `timer.final_gong` controls whether `gong.caf` plays when the final-score prompt opens.
+Negative `timer.metronome.start_seconds` values disable their paired BPM stages; setting every start negative suppresses the metronome. `timer.metronome.volume` controls the peak-normalized tick and tock assets from silence (`0`) through full amplitude (`1`) using a perceptual fader curve; the configured value itself is preserved in results. `timer.final_gong` controls whether `gong.caf` plays when the final-score prompt opens.
 
 `speech.reset_seconds` controls how long an incomplete one- or two-digit trial response may remain idle before its recognition pass is restarted and forgotten. It must be defined in `master_condition_template`.
 
