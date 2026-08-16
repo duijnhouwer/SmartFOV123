@@ -1,3 +1,4 @@
+import CoreText
 import Foundation
 
 struct RGB: Decodable, Sendable {
@@ -152,6 +153,7 @@ struct StimulusConfiguration: Sendable {
 
     let timeBarFillRGB: RGB
     let timeBarHeightArcmin: Float
+    let timeBarCornerRadiusArcmin: Float
     let timeBarBackRGB: RGB
     let timeBarBackHeightArcmin: Float
     let timeBarBackCornerRadiusArcmin: Float
@@ -406,9 +408,10 @@ private struct AnnotationPatch: Decodable {
     }
 }
 
-private struct TimeBarPatch: Decodable {
+private struct TimerSausagePatch: Decodable {
     let fillRGB: RGB?
     let heightDegrees: Float?
+    let cornerRadiusDegrees: Float?
     let backRGB: RGB?
     let backHeightDegrees: Float?
     let backCornerRadiusDegrees: Float?
@@ -416,9 +419,10 @@ private struct TimeBarPatch: Decodable {
     private enum CodingKeys: String, CodingKey {
         case fillRGB = "fill_rgb"
         case heightDegrees = "height_degrees"
+        case cornerRadiusDegrees = "corner_radius_degrees"
         case backRGB = "back_rgb"
         case backHeightDegrees = "back_height_degrees"
-        case backCornerRadiusDegrees = "back_corner_radius"
+        case backCornerRadiusDegrees = "back_corner_radius_degrees"
     }
 }
 
@@ -435,12 +439,12 @@ private struct MetronomePatch: Decodable {
 }
 
 private struct TimerPatch: Decodable {
-    let bar: TimeBarPatch?
+    let sausage: TimerSausagePatch?
     let metronome: MetronomePatch?
     let finalGong: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case bar, metronome
+        case sausage, metronome
         case finalGong = "final_gong"
     }
 }
@@ -565,9 +569,11 @@ private struct ResolvedConditionPatch {
             annotation.fontName = patch.fontName ?? annotation.fontName
             annotation.fontRGB = patch.fontRGB ?? annotation.fontRGB
         }
-        if let patch = definition.timer?.bar {
+        if let patch = definition.timer?.sausage {
             timeBar.fillRGB = patch.fillRGB ?? timeBar.fillRGB
             timeBar.heightDegrees = patch.heightDegrees ?? timeBar.heightDegrees
+            timeBar.cornerRadiusDegrees = patch.cornerRadiusDegrees
+                ?? timeBar.cornerRadiusDegrees
             timeBar.backRGB = patch.backRGB ?? timeBar.backRGB
             timeBar.backHeightDegrees = patch.backHeightDegrees ?? timeBar.backHeightDegrees
             timeBar.backCornerRadiusDegrees = patch.backCornerRadiusDegrees
@@ -631,6 +637,7 @@ private struct ResolvedAnnotation {
 private struct ResolvedTimeBar {
     var fillRGB: RGB?
     var heightDegrees: Float?
+    var cornerRadiusDegrees: Float?
     var backRGB: RGB?
     var backHeightDegrees: Float?
     var backCornerRadiusDegrees: Float?
@@ -811,7 +818,7 @@ private enum ConditionResolver {
             return "\(stimulus.numberOfTilesHorizontal)x\(stimulus.numberOfTilesVertical)"
         })
         let gridSizeDescription = gridSizes.sorted().joined(separator: " or ")
-        let resolvedInstructions = instructions
+        var resolvedInstructions = instructions
             .replacingOccurrences(
                 of: "<NUMBEROFTRIALS>",
                 with: String(trials.count)
@@ -820,6 +827,17 @@ private enum ConditionResolver {
                 of: "<GRIDSIZE>",
                 with: gridSizeDescription
             )
+        if let durationSeconds = file.taskMode.durationSeconds {
+            resolvedInstructions = resolvedInstructions.replacingOccurrences(
+                of: "<TIMER_SECONDS>",
+                with: String(durationSeconds)
+            )
+        } else {
+            resolvedInstructions = resolvedInstructions.replacingOccurrences(
+                of: "<TIMER_SECONDS>",
+                with: "unlimited"
+            )
+        }
         return ExperimentPlan(
             protocolName: protocolName,
             subjectNumberDigitCount: file.subjectNumberDigitCount,
@@ -850,13 +868,16 @@ private enum ConditionResolver {
             try missing("annotation.font_name")
         }
         guard patch.annotation.fontRGB != nil else { try missing("annotation.font_rgb") }
-        guard patch.timeBar.fillRGB != nil else { try missing("timer.bar.fill_rgb") }
+        guard patch.timeBar.fillRGB != nil else { try missing("timer.sausage.fill_rgb") }
         guard let timeBarHeight = patch.timeBar.heightDegrees else {
-            try missing("timer.bar.height_degrees")
+            try missing("timer.sausage.height_degrees")
         }
-        guard patch.timeBar.backRGB != nil else { try missing("timer.bar.back_rgb") }
+        guard let timeBarCornerRadius = patch.timeBar.cornerRadiusDegrees else {
+            try missing("timer.sausage.corner_radius_degrees")
+        }
+        guard patch.timeBar.backRGB != nil else { try missing("timer.sausage.back_rgb") }
         guard let timeBarBackHeight = patch.timeBar.backHeightDegrees else {
-            try missing("timer.bar.back_height_degrees")
+            try missing("timer.sausage.back_height_degrees")
         }
         guard let metronomeStarts = patch.metronome.startSeconds else {
             try missing("timer.metronome.start_seconds")
@@ -875,7 +896,7 @@ private enum ConditionResolver {
         guard let tileGutter = patch.tiles.gutterDegrees else { try missing("tiles.gutter_degrees") }
         guard let tileCornerRadius = patch.tiles.cornerRadiusDegrees else { try missing("tiles.corner_radius_degrees") }
         guard let timeBarBackCornerRadius = patch.timeBar.backCornerRadiusDegrees else {
-            try missing("timer.bar.back_corner_radius")
+            try missing("timer.sausage.back_corner_radius_degrees")
         }
         guard patch.tiles.fillRGB != nil else { try missing("tiles.fill_rgb") }
         guard patch.tiles.gutterRGB != nil else { try missing("tiles.gutter_rgb") }
@@ -933,8 +954,8 @@ private enum ConditionResolver {
         let positive: [(String, Float)] = [
             ("digits.height_degrees", digitHeight),
             ("annotation.height_degrees", annotationHeight),
-            ("timer.bar.height_degrees", timeBarHeight),
-            ("timer.bar.back_height_degrees", timeBarBackHeight),
+            ("timer.sausage.height_degrees", timeBarHeight),
+            ("timer.sausage.back_height_degrees", timeBarBackHeight),
             ("tiles.width_degrees", tileWidth),
             ("tiles.height_degrees", tileHeight),
             ("fov.width_degrees", fovWidth),
@@ -947,7 +968,8 @@ private enum ConditionResolver {
         let nonnegative: [(String, Float)] = [
             ("tiles.gutter_degrees", tileGutter),
             ("tiles.corner_radius_degrees", tileCornerRadius),
-            ("timer.bar.back_corner_radius", timeBarBackCornerRadius),
+            ("timer.sausage.corner_radius_degrees", timeBarCornerRadius),
+            ("timer.sausage.back_corner_radius_degrees", timeBarBackCornerRadius),
             ("surround.inner_margin_degrees", surroundInnerMargin),
             ("surround.inner_corner_radius_degrees", surroundInnerCornerRadius),
             ("surround.outer_corner_radius_degrees", surroundOuterCornerRadius)
@@ -976,8 +998,11 @@ private enum ConditionResolver {
         guard tileCornerRadius * 2 < min(tileWidth, tileHeight) else {
             throw invalid(definitionName, "tiles.corner_radius_degrees is too large for the tiles.")
         }
+        guard timeBarCornerRadius * 2 <= timeBarHeight else {
+            throw invalid(definitionName, "timer.sausage.corner_radius_degrees is too large for height_degrees.")
+        }
         guard timeBarBackCornerRadius * 2 <= timeBarBackHeight else {
-            throw invalid(definitionName, "timer.bar.back_corner_radius is too large for back_height_degrees.")
+            throw invalid(definitionName, "timer.sausage.back_corner_radius_degrees is too large for back_height_degrees.")
         }
         guard !metronomeStarts.isEmpty,
               metronomeStarts.count == metronomeBPM.count else {
@@ -1037,14 +1062,26 @@ private enum ConditionResolver {
         guard spaceAboveCenteredGrid >= timeBarBackHeight else {
             throw invalid(
                 definitionName,
-                "fov.height_degrees leaves insufficient space below the centered tile grid for timer.bar.back_height_degrees."
+                "fov.height_degrees leaves insufficient space below the centered tile grid for timer.sausage.back_height_degrees."
             )
         }
         guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw invalid(definitionName, "digits.font_name must not be empty.")
         }
+        guard fontIsAvailable(named: fontName) else {
+            throw invalid(
+                definitionName,
+                "digits.font_name ‘\(fontName)’ is not installed on this device."
+            )
+        }
         guard !annotationFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw invalid(definitionName, "annotation.font_name must not be empty.")
+        }
+        guard fontIsAvailable(named: annotationFontName) else {
+            throw invalid(
+                definitionName,
+                "annotation.font_name ‘\(annotationFontName)’ is not installed on this device."
+            )
         }
         guard let speechResetSeconds = patch.speechResetSeconds else {
             try missing("speech.reset_seconds")
@@ -1074,6 +1111,16 @@ private enum ConditionResolver {
             }
             return seeds
         }
+    }
+
+    private static func fontIsAvailable(named name: String) -> Bool {
+        let descriptor = CTFontDescriptorCreateWithAttributes(
+            [kCTFontNameAttribute: name] as CFDictionary
+        )
+        return CTFontDescriptorCreateMatchingFontDescriptor(
+            descriptor,
+            Set([kCTFontNameAttribute]) as CFSet
+        ) != nil
     }
 
     private static func validateBlocks(_ blocks: [Int]) throws {
@@ -1124,6 +1171,7 @@ private enum ConditionResolver {
                 annotationFontRGB: patch.annotation.fontRGB!,
                 timeBarFillRGB: patch.timeBar.fillRGB!,
                 timeBarHeightArcmin: patch.timeBar.heightDegrees! * 60,
+                timeBarCornerRadiusArcmin: patch.timeBar.cornerRadiusDegrees! * 60,
                 timeBarBackRGB: patch.timeBar.backRGB!,
                 timeBarBackHeightArcmin: patch.timeBar.backHeightDegrees! * 60,
                 timeBarBackCornerRadiusArcmin: patch.timeBar.backCornerRadiusDegrees! * 60,
@@ -1212,13 +1260,13 @@ private enum JSONShapeValidator {
                 path: "\(path).annotation",
                 allowed: ["height_degrees", "font_name", "font_rgb"]
             )
-            try section(condition["timer"], path: "\(path).timer", allowed: ["bar", "metronome", "final_gong"])
+            try section(condition["timer"], path: "\(path).timer", allowed: ["sausage", "metronome", "final_gong"])
             if let rawTimer = condition["timer"] {
                 let timer = try dictionary(rawTimer, path: "\(path).timer")
                 try section(
-                    timer["bar"],
-                    path: "\(path).timer.bar",
-                    allowed: ["fill_rgb", "height_degrees", "back_rgb", "back_height_degrees", "back_corner_radius"]
+                    timer["sausage"],
+                    path: "\(path).timer.sausage",
+                    allowed: ["fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb", "back_height_degrees", "back_corner_radius_degrees"]
                 )
                 try section(
                     timer["metronome"],

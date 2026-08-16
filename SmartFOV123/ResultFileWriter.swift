@@ -308,12 +308,13 @@ private struct CompletedTrial: Encodable {
                 fontRGB: stimulus.annotationFontRGB.array
             )
             timer = .init(
-                bar: .init(
+                sausage: .init(
                     fillRGB: stimulus.timeBarFillRGB.array,
                     heightDegrees: stimulus.timeBarHeightArcmin / 60,
+                    cornerRadiusDegrees: stimulus.timeBarCornerRadiusArcmin / 60,
                     backRGB: stimulus.timeBarBackRGB.array,
                     backHeightDegrees: stimulus.timeBarBackHeightArcmin / 60,
-                    backCornerRadius: stimulus.timeBarBackCornerRadiusArcmin / 60
+                    backCornerRadiusDegrees: stimulus.timeBarBackCornerRadiusArcmin / 60
                 ),
                 metronome: .init(
                     startSeconds: stimulus.metronomeStartSeconds,
@@ -389,29 +390,31 @@ private struct CompletedTrial: Encodable {
         }
     }
 
-    struct TimeBar: Encodable {
+    struct TimerSausage: Encodable {
         let fillRGB: [Float]
         let heightDegrees: Float
+        let cornerRadiusDegrees: Float
         let backRGB: [Float]
         let backHeightDegrees: Float
-        let backCornerRadius: Float
+        let backCornerRadiusDegrees: Float
 
         private enum CodingKeys: String, CodingKey {
             case fillRGB = "fill_rgb"
             case heightDegrees = "height_degrees"
+            case cornerRadiusDegrees = "corner_radius_degrees"
             case backRGB = "back_rgb"
             case backHeightDegrees = "back_height_degrees"
-            case backCornerRadius = "back_corner_radius"
+            case backCornerRadiusDegrees = "back_corner_radius_degrees"
         }
     }
 
     struct Timer: Encodable {
-        let bar: TimeBar
+        let sausage: TimerSausage
         let metronome: Metronome
         let finalGong: Bool
 
         private enum CodingKeys: String, CodingKey {
-            case bar, metronome
+            case sausage, metronome
             case finalGong = "final_gong"
         }
     }
@@ -609,7 +612,7 @@ private enum JSONPrettyPrinter {
                 "tiles", "surround", "fov", "speech"
             ]
         } else if dictionary.keys.contains("metronome") {
-            preferredOrder = ["bar", "metronome", "final_gong"]
+            preferredOrder = ["sausage", "metronome", "final_gong"]
         } else if dictionary.keys.contains("beats_per_minute") {
             preferredOrder = ["start_seconds", "beats_per_minute", "volume"]
         } else if dictionary.keys.contains("target_number") {
@@ -620,8 +623,8 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["utterance", "ms"]
         } else if dictionary.keys.contains("back_height_degrees") {
             preferredOrder = [
-                "fill_rgb", "height_degrees", "back_rgb", "back_height_degrees",
-                "back_corner_radius"
+                "fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb",
+                "back_height_degrees", "back_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("font_name") {
             preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method"]

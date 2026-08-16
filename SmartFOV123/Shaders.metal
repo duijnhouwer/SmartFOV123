@@ -6,6 +6,7 @@ struct StimulusUniforms {
     float2 centerMeters;
     float2 halfSizeMeters;
     float distanceMeters;
+    float uvMaxX;
 };
 
 struct VertexOut {
@@ -38,6 +39,7 @@ vertex VertexOut stimulusVertex(
     // Quartz bitmap rows and Metal texture coordinates use opposite vertical
     // conventions, so invert V while mapping the completed stimulus texture.
     out.uv = float2(corners[vertexID].x, -corners[vertexID].y) * 0.5 + 0.5;
+    out.uv.x *= uniforms.uvMaxX;
     return out;
 }
 

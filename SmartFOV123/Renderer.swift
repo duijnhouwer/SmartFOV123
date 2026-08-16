@@ -33,6 +33,7 @@ private struct StimulusUniforms {
     var centerMeters: SIMD2<Float>
     var halfSizeMeters: SIMD2<Float>
     var distanceMeters: Float
+    var uvMaxX: Float
 }
 
 private struct StimulusGeometry {
@@ -472,6 +473,7 @@ actor Renderer {
                         ? nil
                         : try TimeBarTexture(
                             device: device,
+                            commandQueue: textureCommandQueue,
                             configuration: request.experiment.configuration
                         ),
                     taskMode: request.taskMode
@@ -744,7 +746,8 @@ actor Renderer {
                             geometry.timeBarCenterYMeters
                         ),
                         halfSize: SIMD2(width / 2, geometry.timeBarHalfHeightMeters),
-                        distance: geometry.distanceMeters
+                        distance: geometry.distanceMeters,
+                        uvMaxX: fraction
                     )
                 }
             }
@@ -826,13 +829,15 @@ actor Renderer {
         clipFromDevice: simd_float4x4,
         center: SIMD2<Float>,
         halfSize: SIMD2<Float>,
-        distance: Float
+        distance: Float,
+        uvMaxX: Float = 1
     ) {
         var uniforms = StimulusUniforms(
             clipFromDevice: clipFromDevice,
             centerMeters: center,
             halfSizeMeters: halfSize,
-            distanceMeters: distance
+            distanceMeters: distance,
+            uvMaxX: uvMaxX
         )
         encoder.setVertexBytes(
             &uniforms,
