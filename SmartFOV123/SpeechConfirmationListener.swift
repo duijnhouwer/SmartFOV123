@@ -91,7 +91,7 @@ final class SpeechConfirmationListener {
         request.contextualStrings = [
             "zero", "one", "two", "three", "four",
             "five", "six", "seven", "eight", "nine",
-            "yes", "no", "begin", "quit"
+            "yes", "no", "begin"
         ]
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true

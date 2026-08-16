@@ -102,12 +102,9 @@ final class AppModel {
     var participantPrompt: ParticipantPrompt? {
         switch trialPhase {
         case .configurationError:
-            let exitInstruction = isListening
-                ? "Speak “Quit” to exit."
-                : "Use the Digital Crown to leave SmartFOV123."
             return .init(
                 title: "Configuration Error",
-                message: "\(statusMessage ?? "The experiment configuration is invalid.")\n\n\(exitInstruction)",
+                message: "\(statusMessage ?? "The experiment configuration is invalid.")\n\nPress the Digital Crown to leave SmartFOV123.",
                 emphasizedText: nil
             )
         case .participantNumber:
@@ -115,22 +112,22 @@ final class AppModel {
             return .init(
                 title: isRetryingSubjectNumber ? "Please try again" : "Welcome!",
                 message: isRetryingSubjectNumber
-                    ? "Please state your \(digitCount)-digit number, one digit at a time.\n\nSpeak “Quit” to exit."
-                    : "Please state your \(digitCount)-digit participant number.\n\nSpeak “Quit” to exit.",
+                    ? "Please state your \(digitCount)-digit number, one digit at a time."
+                    : "Please state your \(digitCount)-digit participant number.",
                 emphasizedText: nil
             )
         case .participantConfirmation:
             guard let pendingSubjectNumber else { return nil }
             return .init(
                 title: "The number you said was:",
-                message: "Is that correct?\nSpeak: “Yes”, “No”, or “Quit”",
+                message: "Is that correct?\nSpeak: “Yes” or “No”",
                 emphasizedText: pendingSubjectNumber
             )
         case .instructions:
             guard let plan else { return nil }
             return .init(
                 title: "Instructions",
-                message: "\(plan.instructions)\n\nReady to start?\nSpeak: “Begin” or “Quit”",
+                message: "\(plan.instructions)\n\nReady to start?\nSpeak: “Begin”",
                 emphasizedText: nil
             )
         case .debriefing:
@@ -223,7 +220,7 @@ final class AppModel {
                 named: UIApplication.didEnterBackgroundNotification
             ) {
                 guard let self else { return }
-                self.terminateResearchApplication()
+                self.terminateWhenBackgrounded()
             }
         }
         Task { @MainActor [weak self] in
@@ -300,15 +297,15 @@ final class AppModel {
             isListening = true
             switch trialPhase {
             case .configurationError:
-                statusMessage = statusMessage ?? "The experiment configuration is invalid. Speak quit to exit."
+                statusMessage = statusMessage ?? "The experiment configuration is invalid."
             case .participantNumber:
                 statusMessage = "Listening for the three-digit participant number."
             case .participantConfirmation:
-                statusMessage = "Listening for yes, no, or quit."
+                statusMessage = "Listening for yes or no."
             case .instructions:
-                statusMessage = "Listening for begin or quit."
+                statusMessage = "Listening for begin."
             case .debriefing:
-                statusMessage = "Debriefing displayed. Listening for quit."
+                statusMessage = "Debriefing displayed."
             case .transitioning:
                 statusMessage = "Preparing the next trial…"
             case .targetCue:
@@ -338,14 +335,6 @@ final class AppModel {
 
     private func handleTranscript(_ transcript: String) {
         guard immersiveSpaceState == .open else { return }
-
-        let commandWords = transcript
-            .lowercased()
-            .split { !$0.isLetter }
-            .map(String.init)
-        if commandWords.contains("quit") {
-            terminateResearchApplication()
-        }
 
         if trialPhase == .configurationError || trialPhase == .debriefing {
             return
@@ -468,13 +457,13 @@ final class AppModel {
         if let error {
             statusMessage = "Speech recognition paused: \(error.localizedDescription) Retrying…"
         } else if trialPhase == .configurationError {
-            statusMessage = "The experiment configuration is invalid. Speak quit to exit."
+            statusMessage = "The experiment configuration is invalid."
         } else if trialPhase == .participantConfirmation {
-            statusMessage = "I didn't catch yes, no, or quit. Listening again…"
+            statusMessage = "I didn't catch yes or no. Listening again…"
         } else if trialPhase == .instructions {
-            statusMessage = "I didn't catch begin or quit. Listening again…"
+            statusMessage = "I didn't catch begin. Listening again…"
         } else if trialPhase == .debriefing {
-            statusMessage = "I didn't catch quit. Listening again…"
+            statusMessage = "Debriefing displayed."
         } else {
             statusMessage = "I didn't catch three digits. Listening again…"
         }
@@ -634,20 +623,13 @@ final class AppModel {
         }
     }
 
-    func terminateResearchApplication() -> Never {
+    /// The Digital Crown returns the windowless experience to Home View,
+    /// which backgrounds the research app. End the session at that point.
+    private func terminateWhenBackgrounded() -> Never {
         speechListener.stop()
         isListening = false
         speechRestartTask?.cancel()
         stimulusPresentationState.hide()
-
-        // Apple intentionally doesn't provide a supported API for a visionOS
-        // app to terminate itself, and calling exit() is not considered good
-        // platform style or appropriate behavior for an App Store app.
-        //
-        // SmartFOV123 is a privately deployed research application. Its
-        // spoken “Quit” command has an explicit experimental requirement to
-        // end the entire process, so we deliberately use exit() here instead
-        // of merely dismissing the app's windows and immersive space.
         exit(EXIT_SUCCESS)
     }
 
