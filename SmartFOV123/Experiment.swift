@@ -100,21 +100,22 @@ struct StimulusConfiguration: Sendable {
     let tileWidthArcmin: Float
     let tileHeightArcmin: Float
     let tileGutterArcmin: Float
-    let tileOuterGutterArcmin: Float
     let tileCornerRadiusArcmin: Float
-    let tileOuterGutterCornerRadiusArcmin: Float
     let tileFillRGB: RGB
     let tileGutterRGB: RGB
     let numberOfTilesHorizontal: Int
     let numberOfTilesVertical: Int
 
+    let surroundFillRGB: RGB
+    let surroundInnerMarginRGB: RGB
+    let surroundInnerMarginArcmin: Float
+    let surroundInnerCornerRadiusArcmin: Float
+    let surroundOuterCornerRadiusArcmin: Float
+
     let fovWidthDegrees: Float
     let fovHeightDegrees: Float
     let fovHorizontalOffsetDegrees: Float
     let fovVerticalOffsetDegrees: Float
-    let fovBackgroundRGB: RGB
-    let fovBorderStrokeArcmin: Float
-    let fovBorderRGB: RGB
     let distanceMeters: Float
 }
 
@@ -326,9 +327,7 @@ private struct TilePatch: Decodable {
     let widthDegrees: Float?
     let heightDegrees: Float?
     let gutterDegrees: Float?
-    let outerGutterDegrees: Float?
     let cornerRadiusDegrees: Float?
-    let outerGutterCornerRadiusDegrees: Float?
     let fillRGB: RGB?
     let gutterRGB: RGB?
     let numberHorizontal: Int?
@@ -338,13 +337,27 @@ private struct TilePatch: Decodable {
         case widthDegrees = "width_degrees"
         case heightDegrees = "height_degrees"
         case gutterDegrees = "gutter_degrees"
-        case outerGutterDegrees = "outer_gutter_degrees"
         case cornerRadiusDegrees = "corner_radius_degrees"
-        case outerGutterCornerRadiusDegrees = "outer_gutter_corner_radius_degrees"
         case fillRGB = "fill_rgb"
         case gutterRGB = "gutter_rgb"
         case numberHorizontal = "number_horizontal"
         case numberVertical = "number_vertical"
+    }
+}
+
+private struct SurroundPatch: Decodable {
+    let fillRGB: RGB?
+    let innerMarginRGB: RGB?
+    let innerMarginDegrees: Float?
+    let innerCornerRadiusDegrees: Float?
+    let outerCornerRadiusDegrees: Float?
+
+    private enum CodingKeys: String, CodingKey {
+        case fillRGB = "fill_rgb"
+        case innerMarginRGB = "inner_margin_rgb"
+        case innerMarginDegrees = "inner_margin_degrees"
+        case innerCornerRadiusDegrees = "inner_corner_radius_degrees"
+        case outerCornerRadiusDegrees = "outer_corner_radius_degrees"
     }
 }
 
@@ -356,9 +369,6 @@ private struct FOVPatch: Decodable {
     let heightDegrees: Float?
     let horizontalOffsetDegrees: Float?
     let verticalOffsetDegrees: Float?
-    let backgroundRGB: RGB?
-    let borderStrokeArcmin: Float?
-    let borderRGB: RGB?
     let distanceMeters: Float?
 
     private enum CodingKeys: String, CodingKey {
@@ -368,9 +378,6 @@ private struct FOVPatch: Decodable {
         case heightDegrees = "height_degrees"
         case horizontalOffsetDegrees = "horizontal_offset_degrees"
         case verticalOffsetDegrees = "vertical_offset_degrees"
-        case backgroundRGB = "background_rgb"
-        case borderStrokeArcmin = "border_stroke_arcmin"
-        case borderRGB = "border_rgb"
         case distanceMeters = "distance_meters"
     }
 }
@@ -387,6 +394,7 @@ private struct ConditionDefinition: Decodable {
     let randomSeed: InheritedField<RandomSeedSpecification>
     let digits: DigitPatch?
     let tiles: TilePatch?
+    let surround: SurroundPatch?
     let fov: FOVPatch?
     let speech: SpeechPatch?
 
@@ -394,7 +402,7 @@ private struct ConditionDefinition: Decodable {
         case name, inherits, repeats
         case randomSeed = "random_seed"
         case blockNumber = "block_nr"
-        case digits, tiles, fov, speech
+        case digits, tiles, surround, fov, speech
     }
 
     init(from decoder: Decoder) throws {
@@ -410,6 +418,7 @@ private struct ConditionDefinition: Decodable {
         )
         digits = try container.decodeIfPresent(DigitPatch.self, forKey: .digits)
         tiles = try container.decodeIfPresent(TilePatch.self, forKey: .tiles)
+        surround = try container.decodeIfPresent(SurroundPatch.self, forKey: .surround)
         fov = try container.decodeIfPresent(FOVPatch.self, forKey: .fov)
         speech = try container.decodeIfPresent(SpeechPatch.self, forKey: .speech)
     }
@@ -431,6 +440,7 @@ private struct ResolvedConditionPatch {
     var randomSeed: RandomSeedSpecification?
     var digits = ResolvedDigits()
     var tiles = ResolvedTiles()
+    var surround = ResolvedSurround()
     var fov = ResolvedFOV()
     var aliases: [String: [String]] = [:]
 
@@ -449,14 +459,20 @@ private struct ResolvedConditionPatch {
             tiles.widthDegrees = patch.widthDegrees ?? tiles.widthDegrees
             tiles.heightDegrees = patch.heightDegrees ?? tiles.heightDegrees
             tiles.gutterDegrees = patch.gutterDegrees ?? tiles.gutterDegrees
-            tiles.outerGutterDegrees = patch.outerGutterDegrees ?? tiles.outerGutterDegrees
             tiles.cornerRadiusDegrees = patch.cornerRadiusDegrees ?? tiles.cornerRadiusDegrees
-            tiles.outerGutterCornerRadiusDegrees = patch.outerGutterCornerRadiusDegrees
-                ?? tiles.outerGutterCornerRadiusDegrees
             tiles.fillRGB = patch.fillRGB ?? tiles.fillRGB
             tiles.gutterRGB = patch.gutterRGB ?? tiles.gutterRGB
             tiles.numberHorizontal = patch.numberHorizontal ?? tiles.numberHorizontal
             tiles.numberVertical = patch.numberVertical ?? tiles.numberVertical
+        }
+        if let patch = definition.surround {
+            surround.fillRGB = patch.fillRGB ?? surround.fillRGB
+            surround.innerMarginRGB = patch.innerMarginRGB ?? surround.innerMarginRGB
+            surround.innerMarginDegrees = patch.innerMarginDegrees ?? surround.innerMarginDegrees
+            surround.innerCornerRadiusDegrees = patch.innerCornerRadiusDegrees
+                ?? surround.innerCornerRadiusDegrees
+            surround.outerCornerRadiusDegrees = patch.outerCornerRadiusDegrees
+                ?? surround.outerCornerRadiusDegrees
         }
         if let patch = definition.fov {
             fov.eye = patch.eye ?? fov.eye
@@ -466,9 +482,6 @@ private struct ResolvedConditionPatch {
             fov.heightDegrees = patch.heightDegrees ?? fov.heightDegrees
             fov.horizontalOffsetDegrees = patch.horizontalOffsetDegrees ?? fov.horizontalOffsetDegrees
             fov.verticalOffsetDegrees = patch.verticalOffsetDegrees ?? fov.verticalOffsetDegrees
-            fov.backgroundRGB = patch.backgroundRGB ?? fov.backgroundRGB
-            fov.borderStrokeArcmin = patch.borderStrokeArcmin ?? fov.borderStrokeArcmin
-            fov.borderRGB = patch.borderRGB ?? fov.borderRGB
             fov.distanceMeters = patch.distanceMeters ?? fov.distanceMeters
         }
         if let patch = definition.speech?.aliases {
@@ -488,13 +501,19 @@ private struct ResolvedTiles {
     var widthDegrees: Float?
     var heightDegrees: Float?
     var gutterDegrees: Float?
-    var outerGutterDegrees: Float?
     var cornerRadiusDegrees: Float?
-    var outerGutterCornerRadiusDegrees: Float?
     var fillRGB: RGB?
     var gutterRGB: RGB?
     var numberHorizontal: Int?
     var numberVertical: Int?
+}
+
+private struct ResolvedSurround {
+    var fillRGB: RGB?
+    var innerMarginRGB: RGB?
+    var innerMarginDegrees: Float?
+    var innerCornerRadiusDegrees: Float?
+    var outerCornerRadiusDegrees: Float?
 }
 
 private struct ResolvedFOV {
@@ -505,9 +524,6 @@ private struct ResolvedFOV {
     var heightDegrees: Float?
     var horizontalOffsetDegrees: Float?
     var verticalOffsetDegrees: Float?
-    var backgroundRGB: RGB?
-    var borderStrokeArcmin: Float?
-    var borderRGB: RGB?
     var distanceMeters: Float?
 }
 
@@ -778,15 +794,22 @@ private enum ConditionResolver {
         guard let tileWidth = patch.tiles.widthDegrees else { try missing("tiles.width_degrees") }
         guard let tileHeight = patch.tiles.heightDegrees else { try missing("tiles.height_degrees") }
         guard let tileGutter = patch.tiles.gutterDegrees else { try missing("tiles.gutter_degrees") }
-        guard let tileOuterGutter = patch.tiles.outerGutterDegrees else { try missing("tiles.outer_gutter_degrees") }
         guard let tileCornerRadius = patch.tiles.cornerRadiusDegrees else { try missing("tiles.corner_radius_degrees") }
-        guard let tileOuterGutterCornerRadius = patch.tiles.outerGutterCornerRadiusDegrees else {
-            try missing("tiles.outer_gutter_corner_radius_degrees")
-        }
         guard patch.tiles.fillRGB != nil else { try missing("tiles.fill_rgb") }
         guard patch.tiles.gutterRGB != nil else { try missing("tiles.gutter_rgb") }
         guard let columns = patch.tiles.numberHorizontal else { try missing("tiles.number_horizontal") }
         guard let rows = patch.tiles.numberVertical else { try missing("tiles.number_vertical") }
+        guard patch.surround.fillRGB != nil else { try missing("surround.fill_rgb") }
+        guard patch.surround.innerMarginRGB != nil else { try missing("surround.inner_margin_rgb") }
+        guard let surroundInnerMargin = patch.surround.innerMarginDegrees else {
+            try missing("surround.inner_margin_degrees")
+        }
+        guard let surroundInnerCornerRadius = patch.surround.innerCornerRadiusDegrees else {
+            try missing("surround.inner_corner_radius_degrees")
+        }
+        guard let surroundOuterCornerRadius = patch.surround.outerCornerRadiusDegrees else {
+            try missing("surround.outer_corner_radius_degrees")
+        }
         guard patch.fov.eye != nil else { try missing("fov.eye") }
         guard patch.fov.mode != nil else { try missing("fov.mode") }
         guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peak_opacity") }
@@ -794,9 +817,6 @@ private enum ConditionResolver {
         guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.height_degrees") }
         guard let horizontalOffset = patch.fov.horizontalOffsetDegrees else { try missing("fov.horizontal_offset_degrees") }
         guard let verticalOffset = patch.fov.verticalOffsetDegrees else { try missing("fov.vertical_offset_degrees") }
-        guard patch.fov.backgroundRGB != nil else { try missing("fov.background_rgb") }
-        guard let borderStroke = patch.fov.borderStrokeArcmin else { try missing("fov.border_stroke_arcmin") }
-        guard patch.fov.borderRGB != nil else { try missing("fov.border_rgb") }
         guard let distance = patch.fov.distanceMeters else { try missing("fov.distance_meters") }
 
         let requiredDigitKeys = Set((0...9).map(String.init))
@@ -841,10 +861,10 @@ private enum ConditionResolver {
         }
         let nonnegative: [(String, Float)] = [
             ("tiles.gutter_degrees", tileGutter),
-            ("tiles.outer_gutter_degrees", tileOuterGutter),
             ("tiles.corner_radius_degrees", tileCornerRadius),
-            ("tiles.outer_gutter_corner_radius_degrees", tileOuterGutterCornerRadius),
-            ("fov.border_stroke_arcmin", borderStroke)
+            ("surround.inner_margin_degrees", surroundInnerMargin),
+            ("surround.inner_corner_radius_degrees", surroundInnerCornerRadius),
+            ("surround.outer_corner_radius_degrees", surroundOuterCornerRadius)
         ]
         for (name, value) in nonnegative where !value.isFinite || value < 0 {
             throw invalid(definitionName, "\(name) must be finite and zero or greater.")
@@ -870,18 +890,16 @@ private enum ConditionResolver {
         guard tileCornerRadius * 2 < min(tileWidth, tileHeight) else {
             throw invalid(definitionName, "tiles.corner_radius_degrees is too large for the tiles.")
         }
-        guard borderStroke / 60 * 2 < min(fovWidth, fovHeight) else {
-            throw invalid(definitionName, "fov.border_stroke_arcmin is too large for the FOV.")
-        }
         let gridWidth = tileWidth * Float(columns)
-            + tileGutter * Float(columns - 1) + tileOuterGutter * 2
+            + tileGutter * Float(columns - 1) + surroundInnerMargin * 2
         let gridHeight = tileHeight * Float(rows)
-            + tileGutter * Float(rows - 1) + tileOuterGutter * 2
+            + tileGutter * Float(rows - 1) + surroundInnerMargin * 2
         guard gridWidth <= fovWidth, gridHeight <= fovHeight else {
             throw invalid(definitionName, "the centered tile grid does not fit inside the FOV.")
         }
-        guard tileOuterGutterCornerRadius * 2 <= min(gridWidth, gridHeight) else {
-            throw invalid(definitionName, "tiles.outer_gutter_corner_radius_degrees is too large for the tile grid.")
+        guard surroundInnerCornerRadius * 2 <= min(gridWidth, gridHeight),
+              surroundOuterCornerRadius * 2 <= min(fovWidth, fovHeight) else {
+            throw invalid(definitionName, "surround corner radius is too large.")
         }
         let spaceAboveCenteredGrid = (fovHeight - gridHeight) / 2
         guard spaceAboveCenteredGrid >= digitHeight * 1.5 else {
@@ -960,20 +978,20 @@ private enum ConditionResolver {
                 tileWidthArcmin: patch.tiles.widthDegrees! * 60,
                 tileHeightArcmin: patch.tiles.heightDegrees! * 60,
                 tileGutterArcmin: patch.tiles.gutterDegrees! * 60,
-                tileOuterGutterArcmin: patch.tiles.outerGutterDegrees! * 60,
                 tileCornerRadiusArcmin: patch.tiles.cornerRadiusDegrees! * 60,
-                tileOuterGutterCornerRadiusArcmin: patch.tiles.outerGutterCornerRadiusDegrees! * 60,
                 tileFillRGB: patch.tiles.fillRGB!,
                 tileGutterRGB: patch.tiles.gutterRGB!,
                 numberOfTilesHorizontal: patch.tiles.numberHorizontal!,
                 numberOfTilesVertical: patch.tiles.numberVertical!,
+                surroundFillRGB: patch.surround.fillRGB!,
+                surroundInnerMarginRGB: patch.surround.innerMarginRGB!,
+                surroundInnerMarginArcmin: patch.surround.innerMarginDegrees! * 60,
+                surroundInnerCornerRadiusArcmin: patch.surround.innerCornerRadiusDegrees! * 60,
+                surroundOuterCornerRadiusArcmin: patch.surround.outerCornerRadiusDegrees! * 60,
                 fovWidthDegrees: patch.fov.widthDegrees!,
                 fovHeightDegrees: patch.fov.heightDegrees!,
                 fovHorizontalOffsetDegrees: patch.fov.horizontalOffsetDegrees!,
                 fovVerticalOffsetDegrees: patch.fov.verticalOffsetDegrees!,
-                fovBackgroundRGB: patch.fov.backgroundRGB!,
-                fovBorderStrokeArcmin: patch.fov.borderStrokeArcmin!,
-                fovBorderRGB: patch.fov.borderRGB!,
                 distanceMeters: patch.fov.distanceMeters!
             )
         )
@@ -1021,7 +1039,7 @@ private enum JSONShapeValidator {
             let condition = try dictionary(rawCondition, path: path)
             try keys(
                 condition,
-                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "tiles", "fov", "speech"],
+                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "tiles", "surround", "fov", "speech"],
                 path: path
             )
             try section(
@@ -1032,12 +1050,17 @@ private enum JSONShapeValidator {
             try section(
                 condition["tiles"],
                 path: "\(path).tiles",
-                allowed: ["width_degrees", "height_degrees", "gutter_degrees", "outer_gutter_degrees", "corner_radius_degrees", "outer_gutter_corner_radius_degrees", "fill_rgb", "gutter_rgb", "number_horizontal", "number_vertical"]
+                allowed: ["width_degrees", "height_degrees", "gutter_degrees", "corner_radius_degrees", "fill_rgb", "gutter_rgb", "number_horizontal", "number_vertical"]
+            )
+            try section(
+                condition["surround"],
+                path: "\(path).surround",
+                allowed: ["fill_rgb", "inner_margin_rgb", "inner_margin_degrees", "inner_corner_radius_degrees", "outer_corner_radius_degrees"]
             )
             try section(
                 condition["fov"],
                 path: "\(path).fov",
-                allowed: ["eye", "mode", "peak_opacity", "width_degrees", "height_degrees", "horizontal_offset_degrees", "vertical_offset_degrees", "background_rgb", "border_stroke_arcmin", "border_rgb", "distance_meters"]
+                allowed: ["eye", "mode", "peak_opacity", "width_degrees", "height_degrees", "horizontal_offset_degrees", "vertical_offset_degrees", "distance_meters"]
             )
             if let rawSpeech = condition["speech"] {
                 let speech = try dictionary(rawSpeech, path: "\(path).speech")

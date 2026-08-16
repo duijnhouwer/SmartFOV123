@@ -11,8 +11,9 @@ This directory is a local mirror of the ChatGPT project “SmartFOV123”.
 
 ### Completion chime
 
-- After completing each user prompt, start a repeating macOS system chime that
-  sounds once every five seconds.
+- After completing a user prompt that took more than 12 seconds to work on,
+  start a repeating macOS system chime that sounds once every five seconds.
 - Keep the chime running until the user says “stop the chime,” then stop it
-  immediately.
+  immediately. A standalone “OK” also stops it immediately; do not respond to
+  that acknowledgement.
 - If a completion chime is already running, do not start another one.

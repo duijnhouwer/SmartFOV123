@@ -19,18 +19,6 @@
         "rgb": [0.2, 0.2, 0.2],
         "random_method": "flat_distribution"
       },
-      "tiles": {
-        "width_degrees": 2.0,
-        "height_degrees": 2.0,
-        "gutter_degrees": 0.2,
-        "outer_gutter_degrees": 0.3,
-        "corner_radius_degrees": 0.3,
-        "outer_gutter_corner_radius_degrees": 0.5,
-        "fill_rgb": [1, 1, 1],
-        "gutter_rgb": [0, 0, 0],
-        "number_horizontal": 6,
-        "number_vertical": 6
-      },
       "fov": {
         "eye": "right",
         "mode": "optical_see_through_simulation",
@@ -39,10 +27,24 @@
         "height_degrees": 21.21,
         "horizontal_offset_degrees": 0.0,
         "vertical_offset_degrees": 0.0,
-        "background_rgb": [1.0, 1.0, 1.0],
-        "border_stroke_arcmin": 0,
-        "border_rgb": [0.0, 0.0, 0.0],
         "distance_meters": 1.5
+      },
+      "tiles": {
+        "width_degrees": 2.0,
+        "height_degrees": 2.0,
+        "gutter_degrees": 0.2,
+        "corner_radius_degrees": 0.3,
+        "fill_rgb": [1, 1, 1],
+        "gutter_rgb": [0, 0, 0],
+        "number_horizontal": 6,
+        "number_vertical": 6
+      },
+      "surround": {
+        "fill_rgb": [1.0, 1.0, 1.0],
+        "inner_margin_rgb": [0, 0, 0],
+        "inner_margin_degrees": 0.3,
+        "inner_corner_radius_degrees": 0.5,
+        "outer_corner_radius_degrees": 0.5
       },
       "speech": {
         "aliases": {

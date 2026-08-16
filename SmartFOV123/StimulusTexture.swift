@@ -44,15 +44,15 @@ struct StimulusTexture {
             degrees: config.tileGutterArcmin / 60,
             distance: config.distanceMeters
         )
-        let outerGutterMeters = Self.sizeMeters(
-            degrees: config.tileOuterGutterArcmin / 60,
+        let surroundInnerMarginMeters = Self.sizeMeters(
+            degrees: config.surroundInnerMarginArcmin / 60,
             distance: config.distanceMeters
         )
 
         let gridWidthMeters = tileWidthMeters * Float(experiment.grid.columns)
-            + gutterMeters * Float(experiment.grid.columns - 1) + outerGutterMeters * 2
+            + gutterMeters * Float(experiment.grid.columns - 1) + surroundInnerMarginMeters * 2
         let gridHeightMeters = tileHeightMeters * Float(experiment.grid.rows)
-            + gutterMeters * Float(experiment.grid.rows - 1) + outerGutterMeters * 2
+            + gutterMeters * Float(experiment.grid.rows - 1) + surroundInnerMarginMeters * 2
         let width = max(
             1,
             Int(ceil(
@@ -93,15 +93,7 @@ struct StimulusTexture {
 
             let scaleX = CGFloat(width) / CGFloat(fovWidthMeters)
             let scaleY = CGFloat(height) / CGFloat(fovHeightMeters)
-            let fovRect = CGRect(
-                x: 0,
-                y: 0,
-                width: width,
-                height: height
-            )
-            context.setFillColor(config.fovBackgroundRGB.cgColor)
-            context.fill(fovRect)
-
+            let surroundRect = CGRect(x: 0, y: 0, width: width, height: height)
             let gridCenter = CGPoint(
                 x: CGFloat(width) / 2,
                 y: CGFloat(height) / 2
@@ -110,21 +102,25 @@ struct StimulusTexture {
             let tileHeight = CGFloat(tileHeightMeters) * scaleY
             let gutterWidth = CGFloat(gutterMeters) * scaleX
             let gutterHeight = CGFloat(gutterMeters) * scaleY
-            let outerGutterWidth = CGFloat(outerGutterMeters) * scaleX
-            let outerGutterHeight = CGFloat(outerGutterMeters) * scaleY
-            let gridRect = CGRect(
+            let surroundInnerMarginWidth = CGFloat(surroundInnerMarginMeters) * scaleX
+            let surroundInnerMarginHeight = CGFloat(surroundInnerMarginMeters) * scaleY
+            let innerMarginRect = CGRect(
                 x: gridCenter.x - (tileWidth * CGFloat(experiment.grid.columns)
                     + gutterWidth * CGFloat(experiment.grid.columns - 1)
-                    + outerGutterWidth * 2) / 2,
+                    + surroundInnerMarginWidth * 2) / 2,
                 y: gridCenter.y - (tileHeight * CGFloat(experiment.grid.rows)
                     + gutterHeight * CGFloat(experiment.grid.rows - 1)
-                    + outerGutterHeight * 2) / 2,
+                    + surroundInnerMarginHeight * 2) / 2,
                 width: tileWidth * CGFloat(experiment.grid.columns)
                     + gutterWidth * CGFloat(experiment.grid.columns - 1)
-                    + outerGutterWidth * 2,
+                    + surroundInnerMarginWidth * 2,
                 height: tileHeight * CGFloat(experiment.grid.rows)
                     + gutterHeight * CGFloat(experiment.grid.rows - 1)
-                    + outerGutterHeight * 2
+                    + surroundInnerMarginHeight * 2
+            )
+            let tileFieldRect = innerMarginRect.insetBy(
+                dx: surroundInnerMarginWidth,
+                dy: surroundInnerMarginHeight
             )
 
             let cornerRadiusMeters = Self.sizeMeters(
@@ -134,32 +130,48 @@ struct StimulusTexture {
             let cornerRadiusPixels = CGFloat(cornerRadiusMeters) * (scaleX + scaleY) / 2
             let maximumCornerRadius = min(tileWidth, tileHeight) / 2
             let cornerRadius = min(cornerRadiusPixels, maximumCornerRadius)
-            let outerCornerRadiusMeters = Self.sizeMeters(
-                degrees: config.tileOuterGutterCornerRadiusArcmin / 60,
+            let surroundInnerCornerRadiusMeters = Self.sizeMeters(
+                degrees: config.surroundInnerCornerRadiusArcmin / 60,
                 distance: config.distanceMeters
             )
-            let outerCornerRadius = min(
-                CGFloat(outerCornerRadiusMeters) * (scaleX + scaleY) / 2,
-                min(gridRect.width, gridRect.height) / 2
+            let surroundInnerCornerRadius = min(
+                CGFloat(surroundInnerCornerRadiusMeters) * (scaleX + scaleY) / 2,
+                min(innerMarginRect.width, innerMarginRect.height) / 2
             )
-            let outerGridPath = CGPath(
-                roundedRect: gridRect,
-                cornerWidth: outerCornerRadius,
-                cornerHeight: outerCornerRadius,
+            let surroundOuterCornerRadiusMeters = Self.sizeMeters(
+                degrees: config.surroundOuterCornerRadiusArcmin / 60,
+                distance: config.distanceMeters
+            )
+            let surroundOuterCornerRadius = min(
+                CGFloat(surroundOuterCornerRadiusMeters) * (scaleX + scaleY) / 2,
+                min(surroundRect.width, surroundRect.height) / 2
+            )
+            let surroundPath = CGPath(
+                roundedRect: surroundRect,
+                cornerWidth: surroundOuterCornerRadius,
+                cornerHeight: surroundOuterCornerRadius,
                 transform: nil
             )
-            context.setFillColor(config.tileGutterRGB.cgColor)
-            context.addPath(outerGridPath)
+            context.setFillColor(config.surroundFillRGB.cgColor)
+            context.addPath(surroundPath)
             context.fillPath()
             context.saveGState()
-            context.addPath(outerGridPath)
+            context.addPath(surroundPath)
             context.clip()
+            context.setFillColor(config.surroundInnerMarginRGB.cgColor)
+            context.addPath(CGPath(
+                roundedRect: innerMarginRect,
+                cornerWidth: surroundInnerCornerRadius,
+                cornerHeight: surroundInnerCornerRadius,
+                transform: nil
+            ))
+            context.fillPath()
             context.setFillColor(config.tileFillRGB.cgColor)
             for row in 0..<experiment.grid.rows {
                 for column in 0..<experiment.grid.columns {
                     let tileRect = CGRect(
-                        x: gridRect.minX + outerGutterWidth + CGFloat(column) * (tileWidth + gutterWidth),
-                        y: gridRect.minY + outerGutterHeight + CGFloat(row) * (tileHeight + gutterHeight),
+                        x: tileFieldRect.minX + CGFloat(column) * (tileWidth + gutterWidth),
+                        y: tileFieldRect.minY + CGFloat(row) * (tileHeight + gutterHeight),
                         width: tileWidth,
                         height: tileHeight
                     )
@@ -194,8 +206,8 @@ struct StimulusTexture {
             Self.drawText(
                 "Find \(experiment.grid.targetNumber)",
                 centeredAt: CGPoint(
-                    x: gridRect.midX,
-                    y: gridRect.maxY + desiredCapHeight
+                    x: innerMarginRect.midX,
+                    y: innerMarginRect.maxY + desiredCapHeight
                 ),
                 attributes: attributes,
                 in: context
@@ -205,9 +217,9 @@ struct StimulusTexture {
                 let row = index / experiment.grid.columns
                 let column = index % experiment.grid.columns
                 let center = CGPoint(
-                    x: gridRect.minX + outerGutterWidth + CGFloat(column) * (tileWidth + gutterWidth)
+                    x: tileFieldRect.minX + CGFloat(column) * (tileWidth + gutterWidth)
                         + tileWidth / 2,
-                    y: gridRect.maxY - outerGutterHeight - CGFloat(row) * (tileHeight + gutterHeight)
+                    y: tileFieldRect.maxY - CGFloat(row) * (tileHeight + gutterHeight)
                         - tileHeight / 2
                 )
                 let glyph = presentation == .masked
@@ -224,24 +236,13 @@ struct StimulusTexture {
             Self.drawText(
                 String(format: "%03d trials remain", max(0, trialsRemaining)),
                 centeredAt: CGPoint(
-                    x: gridRect.midX,
-                    y: gridRect.minY - desiredCapHeight
+                    x: innerMarginRect.midX,
+                    y: innerMarginRect.minY - desiredCapHeight
                 ),
                 attributes: attributes,
                 in: context
             )
 
-            let fovStrokeMeters = Self.sizeMeters(
-                degrees: config.fovBorderStrokeArcmin / 60,
-                distance: config.distanceMeters
-            )
-            let fovStrokePixels = max(
-                0.01,
-                CGFloat(fovStrokeMeters) * (scaleX + scaleY) / 2
-            )
-            context.setStrokeColor(config.fovBorderRGB.cgColor)
-            context.setLineWidth(fovStrokePixels)
-            context.stroke(fovRect.insetBy(dx: fovStrokePixels / 2, dy: fovStrokePixels / 2))
         }
 
         Self.applyDisplayModel(display, to: &pixels)

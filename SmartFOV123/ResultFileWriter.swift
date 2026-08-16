@@ -236,6 +236,7 @@ private struct CompletedTrial: Encodable {
         let randomSeed: UInt64
         let digits: Digits
         let tiles: Tiles
+        let surround: Surround
         let fov: FOV
         let speech: Speech
 
@@ -255,13 +256,18 @@ private struct CompletedTrial: Encodable {
                 widthDegrees: stimulus.tileWidthArcmin / 60,
                 heightDegrees: stimulus.tileHeightArcmin / 60,
                 gutterDegrees: stimulus.tileGutterArcmin / 60,
-                outerGutterDegrees: stimulus.tileOuterGutterArcmin / 60,
                 cornerRadiusDegrees: stimulus.tileCornerRadiusArcmin / 60,
-                outerGutterCornerRadiusDegrees: stimulus.tileOuterGutterCornerRadiusArcmin / 60,
                 fillRGB: stimulus.tileFillRGB.array,
                 gutterRGB: stimulus.tileGutterRGB.array,
                 numberHorizontal: stimulus.numberOfTilesHorizontal,
                 numberVertical: stimulus.numberOfTilesVertical
+            )
+            surround = .init(
+                fillRGB: stimulus.surroundFillRGB.array,
+                innerMarginRGB: stimulus.surroundInnerMarginRGB.array,
+                innerMarginDegrees: stimulus.surroundInnerMarginArcmin / 60,
+                innerCornerRadiusDegrees: stimulus.surroundInnerCornerRadiusArcmin / 60,
+                outerCornerRadiusDegrees: stimulus.surroundOuterCornerRadiusArcmin / 60
             )
             fov = .init(
                 eye: stimulus.eye.rawValue,
@@ -271,16 +277,13 @@ private struct CompletedTrial: Encodable {
                 heightDegrees: stimulus.fovHeightDegrees,
                 horizontalOffsetDegrees: stimulus.fovHorizontalOffsetDegrees,
                 verticalOffsetDegrees: stimulus.fovVerticalOffsetDegrees,
-                backgroundRGB: stimulus.fovBackgroundRGB.array,
-                borderStrokeArcmin: stimulus.fovBorderStrokeArcmin,
-                borderRGB: stimulus.fovBorderRGB.array,
                 distanceMeters: stimulus.distanceMeters
             )
             speech = .init(aliases: configuration.speech.digitAliases)
         }
 
         private enum CodingKeys: String, CodingKey {
-            case digits, tiles, fov, speech
+            case digits, tiles, surround, fov, speech
             case conditionName = "condition_name"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
@@ -305,9 +308,7 @@ private struct CompletedTrial: Encodable {
         let widthDegrees: Float
         let heightDegrees: Float
         let gutterDegrees: Float
-        let outerGutterDegrees: Float
         let cornerRadiusDegrees: Float
-        let outerGutterCornerRadiusDegrees: Float
         let fillRGB: [Float]
         let gutterRGB: [Float]
         let numberHorizontal: Int
@@ -317,13 +318,27 @@ private struct CompletedTrial: Encodable {
             case widthDegrees = "width_degrees"
             case heightDegrees = "height_degrees"
             case gutterDegrees = "gutter_degrees"
-            case outerGutterDegrees = "outer_gutter_degrees"
             case cornerRadiusDegrees = "corner_radius_degrees"
-            case outerGutterCornerRadiusDegrees = "outer_gutter_corner_radius_degrees"
             case fillRGB = "fill_rgb"
             case gutterRGB = "gutter_rgb"
             case numberHorizontal = "number_horizontal"
             case numberVertical = "number_vertical"
+        }
+    }
+
+    struct Surround: Encodable {
+        let fillRGB: [Float]
+        let innerMarginRGB: [Float]
+        let innerMarginDegrees: Float
+        let innerCornerRadiusDegrees: Float
+        let outerCornerRadiusDegrees: Float
+
+        private enum CodingKeys: String, CodingKey {
+            case fillRGB = "fill_rgb"
+            case innerMarginRGB = "inner_margin_rgb"
+            case innerMarginDegrees = "inner_margin_degrees"
+            case innerCornerRadiusDegrees = "inner_corner_radius_degrees"
+            case outerCornerRadiusDegrees = "outer_corner_radius_degrees"
         }
     }
 
@@ -335,9 +350,6 @@ private struct CompletedTrial: Encodable {
         let heightDegrees: Float
         let horizontalOffsetDegrees: Float
         let verticalOffsetDegrees: Float
-        let backgroundRGB: [Float]
-        let borderStrokeArcmin: Float
-        let borderRGB: [Float]
         let distanceMeters: Float
 
         private enum CodingKeys: String, CodingKey {
@@ -347,9 +359,6 @@ private struct CompletedTrial: Encodable {
             case heightDegrees = "height_degrees"
             case horizontalOffsetDegrees = "horizontal_offset_degrees"
             case verticalOffsetDegrees = "vertical_offset_degrees"
-            case backgroundRGB = "background_rgb"
-            case borderStrokeArcmin = "border_stroke_arcmin"
-            case borderRGB = "border_rgb"
             case distanceMeters = "distance_meters"
         }
     }
@@ -463,7 +472,7 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_name") {
             preferredOrder = [
-                "condition_name", "block_nr", "random_seed", "digits", "tiles", "fov", "speech"
+                "condition_name", "block_nr", "random_seed", "digits", "tiles", "surround", "fov", "speech"
             ]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
@@ -475,16 +484,19 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["height_degrees", "font_name", "rgb", "random_method"]
         } else if dictionary.keys.contains("number_horizontal") {
             preferredOrder = [
-                "width_degrees", "height_degrees", "gutter_degrees", "outer_gutter_degrees",
-                "corner_radius_degrees", "outer_gutter_corner_radius_degrees",
+                "width_degrees", "height_degrees", "gutter_degrees", "corner_radius_degrees",
                 "fill_rgb", "gutter_rgb",
                 "number_horizontal", "number_vertical"
             ]
         } else if dictionary.keys.contains("peak_opacity") {
             preferredOrder = [
                 "eye", "mode", "peak_opacity", "width_degrees", "height_degrees",
-                "horizontal_offset_degrees", "vertical_offset_degrees", "background_rgb",
-                "border_stroke_arcmin", "border_rgb", "distance_meters"
+                "horizontal_offset_degrees", "vertical_offset_degrees", "distance_meters"
+            ]
+        } else if dictionary.keys.contains("inner_margin_degrees") {
+            preferredOrder = [
+                "fill_rgb", "inner_margin_rgb", "inner_margin_degrees",
+                "inner_corner_radius_degrees", "outer_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("aliases") {
             preferredOrder = ["aliases"]
