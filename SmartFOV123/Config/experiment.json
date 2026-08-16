@@ -2,9 +2,10 @@
   "schema_version": 5,
   "protocol_name": "example",
   "subject_number_digit_count": 3,
-  "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nNumbers must be spoken one digit at time.\n\nThe next trial begins automatically after a correct response.\n\nThere will be <NUMBEROFTRIALS> trials.",
+  "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nNumbers must be spoken one digit at time.\n\nThe next target appears automatically after a correct response.\n\nFind as many targets as possible before time runs out.",
   "debriefing": "Thank you for your participation!\n\nPress the Digital Crown to return to Home View.",
   "foveated_rendering": true,
+  "task_mode": "loop_trials_300_seconds",
 
   "conditions": [
     {
@@ -15,7 +16,7 @@
       "random_seed": null,
       "digits": {
         "height_degrees": 0.7,
-        "font_name": "Arial",
+        "font_name": "Courier",
         "rgb": [0, 0, 0],
         "random_method": "flat_distribution"
       },
@@ -45,6 +46,11 @@
         "inner_margin_degrees": 0.3,
         "inner_corner_radius_degrees": 0.5,
         "outer_corner_radius_degrees": 0.5
+      },
+      "annotation": {
+        "height_degrees": 0.6,
+        "font_name": "Arial",
+        "rgb": [0, 0, 0]
       },
       "speech": {
         "aliases": {

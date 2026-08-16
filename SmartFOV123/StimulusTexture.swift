@@ -15,6 +15,8 @@ struct StimulusTexture {
         device: MTLDevice,
         commandQueue: MTLCommandQueue,
         experiment: Experiment,
+        taskMode: TaskMode,
+        score: Int,
         trialsRemaining: Int,
         presentation: Presentation
     ) throws {
@@ -181,35 +183,64 @@ struct StimulusTexture {
             }
             context.restoreGState()
 
-            let desiredCapHeight = CGFloat(
+            let desiredDigitCapHeight = CGFloat(
                 Self.sizeMeters(
                     degrees: config.digitHeightArcmin / 60,
                     distance: config.distanceMeters
                 )
             ) * scaleY
-            let trialFont = CTFontCreateWithName(config.digitFontName as CFString, 100, nil)
-            let trialCapHeight = CTFontGetCapHeight(trialFont)
-            guard trialCapHeight > 0 else {
-                throw StimulusTextureError.invalidFont(config.digitFontName)
-            }
-            let font = CTFontCreateWithName(
-                config.digitFontName as CFString,
-                100 * desiredCapHeight / trialCapHeight,
-                nil
+            let desiredAnnotationCapHeight = CGFloat(
+                Self.sizeMeters(
+                    degrees: config.annotationHeightArcmin / 60,
+                    distance: config.distanceMeters
+                )
+            ) * scaleY
+            let digitFont = try Self.font(
+                named: config.digitFontName,
+                capHeight: desiredDigitCapHeight
             )
-            let attributes: [NSAttributedString.Key: Any] = [
-                NSAttributedString.Key(kCTFontAttributeName as String): font,
+            let annotationFont = try Self.font(
+                named: config.annotationFontName,
+                capHeight: desiredAnnotationCapHeight
+            )
+            let digitAttributes: [NSAttributedString.Key: Any] = [
+                NSAttributedString.Key(kCTFontAttributeName as String): digitFont,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
                     config.digitRGB.cgColor
             ]
+            let annotationAttributes: [NSAttributedString.Key: Any] = [
+                NSAttributedString.Key(kCTFontAttributeName as String): annotationFont,
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String):
+                    config.annotationRGB.cgColor
+            ]
 
+            let headingY = innerMarginRect.maxY + desiredAnnotationCapHeight
+            let targetHeading = "Target: \(experiment.grid.targetNumber)"
+            if case .loopTrials = taskMode {
+                let scoreHeading = String(format: "Score: %03d", max(0, score))
+                Self.drawText(
+                    scoreHeading,
+                    centeredAt: CGPoint(
+                        x: innerMarginRect.maxX - Self.textWidth(
+                            scoreHeading,
+                            attributes: annotationAttributes
+                        ) / 2,
+                        y: headingY
+                    ),
+                    attributes: annotationAttributes,
+                    in: context
+                )
+            }
             Self.drawText(
-                "Find \(experiment.grid.targetNumber)",
+                targetHeading,
                 centeredAt: CGPoint(
-                    x: innerMarginRect.midX,
-                    y: innerMarginRect.maxY + desiredCapHeight
+                    x: innerMarginRect.minX + Self.textWidth(
+                        targetHeading,
+                        attributes: annotationAttributes
+                    ) / 2,
+                    y: headingY
                 ),
-                attributes: attributes,
+                attributes: annotationAttributes,
                 in: context
             )
 
@@ -228,20 +259,22 @@ struct StimulusTexture {
                 Self.drawText(
                     glyph,
                     centeredAt: center,
-                    attributes: attributes,
+                    attributes: digitAttributes,
                     in: context
                 )
             }
 
-            Self.drawText(
-                String(format: "%03d trials remain", max(0, trialsRemaining)),
-                centeredAt: CGPoint(
-                    x: innerMarginRect.midX,
-                    y: innerMarginRect.minY - desiredCapHeight
-                ),
-                attributes: attributes,
-                in: context
-            )
+            if taskMode == .fixedNumberOfTrials {
+                Self.drawText(
+                    String(format: "%03d trials remain", max(0, trialsRemaining)),
+                    centeredAt: CGPoint(
+                        x: innerMarginRect.midX,
+                        y: innerMarginRect.minY - desiredAnnotationCapHeight
+                    ),
+                    attributes: annotationAttributes,
+                    in: context
+                )
+            }
 
         }
 
@@ -286,11 +319,18 @@ struct StimulusTexture {
         attributes: [NSAttributedString.Key: Any],
         in context: CGContext
     ) {
-        let attributed = CFAttributedStringCreate(
-            nil,
-            string as CFString,
-            attributes as CFDictionary
-        )!
+        drawText(
+            NSAttributedString(string: string, attributes: attributes),
+            centeredAt: center,
+            in: context
+        )
+    }
+
+    private static func drawText(
+        _ attributed: NSAttributedString,
+        centeredAt center: CGPoint,
+        in context: CGContext
+    ) {
         let line = CTLineCreateWithAttributedString(attributed)
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
@@ -303,6 +343,29 @@ struct StimulusTexture {
             y: center.y - (ascent + descent) / 2 + descent
         )
         CTLineDraw(line, context)
+    }
+
+    private static func textWidth(
+        _ string: String,
+        attributes: [NSAttributedString.Key: Any]
+    ) -> CGFloat {
+        let line = CTLineCreateWithAttributedString(
+            NSAttributedString(string: string, attributes: attributes)
+        )
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
+
+    private static func font(named name: String, capHeight: CGFloat) throws -> CTFont {
+        let trialFont = CTFontCreateWithName(name as CFString, 100, nil)
+        let trialCapHeight = CTFontGetCapHeight(trialFont)
+        guard trialCapHeight > 0 else {
+            throw StimulusTextureError.invalidFont(name)
+        }
+        return CTFontCreateWithName(
+            name as CFString,
+            100 * capHeight / trialCapHeight,
+            nil
+        )
     }
 
     private static func applyDisplayModel(

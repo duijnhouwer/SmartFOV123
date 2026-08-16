@@ -386,6 +386,8 @@ actor Renderer {
                         device: device,
                         commandQueue: textureCommandQueue,
                         experiment: request.experiment,
+                        taskMode: request.taskMode,
+                        score: request.score,
                         trialsRemaining: request.trialsRemaining,
                         presentation: .masked
                     ),
@@ -393,6 +395,8 @@ actor Renderer {
                         device: device,
                         commandQueue: textureCommandQueue,
                         experiment: request.experiment,
+                        taskMode: request.taskMode,
+                        score: request.score,
                         trialsRemaining: request.trialsRemaining,
                         presentation: .revealed
                     )

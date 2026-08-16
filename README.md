@@ -14,13 +14,13 @@ For example, if the target is `536` and the grid contains:
 
 the target runs vertically through the middle column, so the participant says “seven, three, eight.” Target placement always leaves room for this three-cell crossing, which means target centers never occur on a grid edge. The generator accepts a grid only when both the target number and its perpendicular confirmation number occur exactly once across all horizontal and vertical three-digit sequences.
 
-The app opens directly into a binocular, head-locked compositor experience. Before trial 1, a visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes or no. Saying no, or anything other than yes, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin.” Each trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically to the next scheduled trial. Trials have no automatic time limit. Pressing the Digital Crown backgrounds the windowless research app, which then deliberately terminates.
+The app opens directly into a binocular, head-locked compositor experience. Before trial 1, a visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes or no. Saying no, or anything other than yes, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin.” Each trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically. Fixed-trial tasks end after the scheduled trials; time-based tasks score as many completed targets as possible before their deadline. Pressing the Digital Crown backgrounds the windowless research app, which then deliberately terminates.
 
 Spoken forms are configured under `speech.aliases` in the master condition. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must resolve to at least one alias, and one alias cannot belong to multiple digits.
 
 ## Multi-trial configuration
 
-Schema version 5 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, and nonempty `instructions` and `debriefing` text. `foveated_rendering` defaults to `true` and is disabled only when explicitly set to `false`. The protocol name is copied into every result file; the other fields control participant-number collection and the participant cards. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands to a unique immutable identity such as `condition1`, even when seeds or all resolved parameters are identical.
+Schema version 5 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, nonempty `instructions` and `debriefing` text, and `task_mode`. Use `"fixed_number_of_trials"` for the original behavior or `"loop_trials_<seconds>_seconds"`—for example, `"loop_trials_300_seconds"`—to loop the specified schedule for a positive integer countdown. `foveated_rendering` defaults to `true` and is disabled only when explicitly set to `false`. The protocol name is copied into every result file; the other fields control participant-number collection and the participant cards. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter, including the `annotation` height, font, and RGB used by labels outside the target grid. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands into a scheduled condition such as `condition1`.
 
 `random_seed` accepts:
 
@@ -28,7 +28,7 @@ Schema version 5 uses snake_case property names and enum values. The root protoc
 - One unsigned integer, reused for every repetition.
 - An unsigned-integer array whose length must equal `repeats`.
 
-Every instantiated condition requires `block_nr >= 1`. Used block numbers must begin at 1 and be consecutive without gaps. Blocks run in ascending order, and their trials are randomized within each block. Initial trial names (`trial1`, `trial2`, …) are assigned after scheduling and remain separate from condition identities so a future retry can create a new trial for an existing condition.
+Every instantiated condition requires `block_nr >= 1`. Used block numbers must begin at 1 and be consecutive without gaps. Blocks run in ascending order, and their trials are randomized within each block. Fixed-trial mode runs that schedule once. Loop-trials mode cycles the scheduled order until its deadline, reusing each trial's configured random seed on every pass. Use `"shuffle"` when you want each scheduled trial to receive a unique seed at experiment creation; use a fixed seed or a seed list when you intentionally want repeats. Trial names (`trial1`, `trial2`, …) remain unique when loop-trials mode revisits a source condition.
 
 The entire configuration and schedule are preflighted at app launch. Validation rejects malformed or unknown keys, incomplete master parameters, invalid or circular inheritance, illegal reserved names, duplicate expanded names, invalid repeats or seed arrays, nonconsecutive blocks, and invalid geometry, colors, or speech aliases. Both `tiles.number_horizontal` and `tiles.number_vertical` must be at least 4. If preflight fails, the participant card reports the configuration error.
 
@@ -62,6 +62,7 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
     "application": "SmartFOV123",
     "protocol_name": "example",
     "subject_number": "007",
+    "task_mode": "loop_trials_300_seconds",
     "start_date": "2026-08-14",
     "start_time": "13:01:56-04:00"
   },
@@ -73,6 +74,7 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "block_nr": 1,
         "random_seed": 123,
         "digits": { "...": "complete resolved digit parameters" },
+        "annotation": { "...": "complete resolved annotation parameters" },
         "tiles": { "...": "complete resolved tile parameters" },
         "surround": { "...": "complete resolved surround parameters" },
         "fov": { "...": "complete resolved FOV parameters" },
@@ -91,11 +93,16 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "speech": [{"utterance": "512", "ms": 4817}, {"utterance": "613", "ms": 12751}]
       }
     }
-  ]
+  ],
+  "summary": {
+    "score": 12,
+    "duration_seconds": 300,
+    "end_time_ms": 312751
+  }
 }
 ```
 
-The `experiment` block records the application, configured protocol, confirmed participant number, and local experiment-start date and time in ISO 8601-compatible forms. The participant number is a string so leading zeroes are preserved. Each trial has its scheduled name and a complete `definition` containing the source condition name, concrete block and random seed, and every resolved parameter section. `inherits` and `repeats` are omitted because they have no meaning in a completed-trial record. `seeded_stimulus` records the generated target, its `leftright` or `topdown` orientation, the expected response, and the displayed grid as rows of integer digits. `results` records monotonic integer milliseconds since app launch for the trial start, digit reveal, and correct response, plus every transcript that successfully parsed as three digits and its detection time. Speech aliases are replaced with their configured digits before storage, and an entirely numeric result is collapsed without spaces (`Free 56` becomes `356` when `free` maps to `3`). Words without a configured mapping remain visible in the stored utterance. These timestamps intentionally provide practical event timing rather than millisecond measurement precision.
+The `experiment` block records the application, configured protocol, confirmed participant number, and local experiment-start date and time in ISO 8601-compatible forms. Loop-trials files also record `task_mode`. The participant number is a string so leading zeroes are preserved. Each trial has its unique name and a complete `definition` containing the source condition name, concrete block and actual random seed, and every resolved parameter section. `inherits` and `repeats` are omitted because they have no meaning in a completed-trial record. `seeded_stimulus` records the generated target, its `leftright` or `topdown` orientation, the expected response, and the displayed grid as rows of integer digits. `results` records monotonic integer milliseconds since app launch for the trial start, digit reveal, and correct response, plus every transcript that successfully parsed as three digits and its detection time. Speech aliases are replaced with their configured digits before storage, and an entirely numeric result is collapsed without spaces (`Free 56` becomes `356` when `free` maps to `3`). Words without a configured mapping remain visible in the stored utterance. At a loop-trials deadline, `summary` records the final score, configured duration, and end time, even when no target was completed. These timestamps intentionally provide practical event timing rather than millisecond measurement precision.
 
 Scalar arrays, grid rows, and speech detections are formatted horizontally. No inheritance resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
 

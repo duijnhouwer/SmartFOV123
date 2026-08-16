@@ -64,6 +64,54 @@ enum DigitRandomMethod: String, Decodable, CaseIterable, Sendable {
     }
 }
 
+enum TaskMode: Equatable, Sendable {
+    case fixedNumberOfTrials
+    case loopTrials(seconds: Int)
+
+    var rawValue: String {
+        switch self {
+        case .fixedNumberOfTrials:
+            return "fixed_number_of_trials"
+        case .loopTrials(let seconds):
+            return "loop_trials_\(seconds)_seconds"
+        }
+    }
+
+    var durationSeconds: Int? {
+        guard case .loopTrials(let seconds) = self else { return nil }
+        return seconds
+    }
+}
+
+extension TaskMode: Decodable {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        if value == "fixed_number_of_trials" {
+            self = .fixedNumberOfTrials
+            return
+        }
+
+        let prefix = "loop_trials_"
+        let suffix = "_seconds"
+        guard value.hasPrefix(prefix), value.hasSuffix(suffix) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Expected ‘fixed_number_of_trials’ or ‘loop_trials_<positive integer>_seconds’."
+            )
+        }
+        let secondsText = value.dropFirst(prefix.count).dropLast(suffix.count)
+        guard let seconds = Int(secondsText), seconds > 0,
+              String(secondsText) == String(seconds) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "A loop-trials task duration must be a canonical positive integer number of seconds."
+            )
+        }
+        self = .loopTrials(seconds: seconds)
+    }
+}
+
 struct DisplayConfiguration: Sendable {
     let mode: DisplayMode
     let peakOpacity: Float
@@ -96,6 +144,10 @@ struct StimulusConfiguration: Sendable {
     let digitFontName: String
     let digitRGB: RGB
     let digitRandomMethod: DigitRandomMethod
+
+    let annotationHeightArcmin: Float
+    let annotationFontName: String
+    let annotationRGB: RGB
 
     let tileWidthArcmin: Float
     let tileHeightArcmin: Float
@@ -153,6 +205,7 @@ struct Experiment: Sendable {
     let trialNumber: Int
     let conditionName: String
     let blockNumber: Int
+    let randomSeed: UInt64
     let configuration: ExperimentConfiguration
     let grid: NumberGrid
 }
@@ -163,13 +216,18 @@ struct ScheduledTrial: Sendable {
     let blockNumber: Int
     let configuration: ExperimentConfiguration
 
-    func instantiate() -> Experiment {
-        Experiment(
-            trialNumber: trialNumber,
+    func instantiate(trialNumber: Int? = nil) -> Experiment {
+        let seed = configuration.stimulus.randomSeed
+        return Experiment(
+            trialNumber: trialNumber ?? self.trialNumber,
             conditionName: conditionName,
             blockNumber: blockNumber,
+            randomSeed: seed,
             configuration: configuration,
-            grid: NumberGridGenerator.makeGrid(using: configuration.stimulus)
+            grid: NumberGridGenerator.makeGrid(
+                using: configuration.stimulus,
+                randomSeed: seed
+            )
         )
     }
 }
@@ -179,6 +237,7 @@ struct ExperimentPlan: Sendable {
     let subjectNumberDigitCount: Int
     let instructions: String
     let debriefing: String
+    let taskMode: TaskMode
     /// Compositor-layer configuration is fixed for the duration of a session,
     /// so this option applies consistently to every trial in the plan.
     let foveatedRendering: Bool
@@ -263,6 +322,7 @@ private struct ExperimentFile: Decodable {
     let subjectNumberDigitCount: Int
     let instructions: String
     let debriefing: String
+    let taskMode: TaskMode
     let foveatedRendering: Bool?
     let conditions: [ConditionDefinition]
 
@@ -272,6 +332,7 @@ private struct ExperimentFile: Decodable {
         case subjectNumberDigitCount = "subject_number_digit_count"
         case instructions
         case debriefing
+        case taskMode = "task_mode"
         case foveatedRendering = "foveated_rendering"
         case conditions
     }
@@ -320,6 +381,18 @@ private struct DigitPatch: Decodable {
         case fontName = "font_name"
         case rgb
         case randomMethod = "random_method"
+    }
+}
+
+private struct AnnotationPatch: Decodable {
+    let heightDegrees: Float?
+    let fontName: String?
+    let rgb: RGB?
+
+    private enum CodingKeys: String, CodingKey {
+        case heightDegrees = "height_degrees"
+        case fontName = "font_name"
+        case rgb
     }
 }
 
@@ -393,6 +466,7 @@ private struct ConditionDefinition: Decodable {
     let repeats: InheritedField<Int>
     let randomSeed: InheritedField<RandomSeedSpecification>
     let digits: DigitPatch?
+    let annotation: AnnotationPatch?
     let tiles: TilePatch?
     let surround: SurroundPatch?
     let fov: FOVPatch?
@@ -402,7 +476,7 @@ private struct ConditionDefinition: Decodable {
         case name, inherits, repeats
         case randomSeed = "random_seed"
         case blockNumber = "block_nr"
-        case digits, tiles, surround, fov, speech
+        case digits, annotation, tiles, surround, fov, speech
     }
 
     init(from decoder: Decoder) throws {
@@ -417,6 +491,7 @@ private struct ConditionDefinition: Decodable {
             from: container
         )
         digits = try container.decodeIfPresent(DigitPatch.self, forKey: .digits)
+        annotation = try container.decodeIfPresent(AnnotationPatch.self, forKey: .annotation)
         tiles = try container.decodeIfPresent(TilePatch.self, forKey: .tiles)
         surround = try container.decodeIfPresent(SurroundPatch.self, forKey: .surround)
         fov = try container.decodeIfPresent(FOVPatch.self, forKey: .fov)
@@ -439,6 +514,7 @@ private struct ResolvedConditionPatch {
     var repeats: Int?
     var randomSeed: RandomSeedSpecification?
     var digits = ResolvedDigits()
+    var annotation = ResolvedAnnotation()
     var tiles = ResolvedTiles()
     var surround = ResolvedSurround()
     var fov = ResolvedFOV()
@@ -454,6 +530,11 @@ private struct ResolvedConditionPatch {
             digits.fontName = patch.fontName ?? digits.fontName
             digits.rgb = patch.rgb ?? digits.rgb
             digits.randomMethod = patch.randomMethod ?? digits.randomMethod
+        }
+        if let patch = definition.annotation {
+            annotation.heightDegrees = patch.heightDegrees ?? annotation.heightDegrees
+            annotation.fontName = patch.fontName ?? annotation.fontName
+            annotation.rgb = patch.rgb ?? annotation.rgb
         }
         if let patch = definition.tiles {
             tiles.widthDegrees = patch.widthDegrees ?? tiles.widthDegrees
@@ -495,6 +576,12 @@ private struct ResolvedDigits {
     var fontName: String?
     var rgb: RGB?
     var randomMethod: DigitRandomMethod?
+}
+
+private struct ResolvedAnnotation {
+    var heightDegrees: Float?
+    var fontName: String?
+    var rgb: RGB?
 }
 
 private struct ResolvedTiles {
@@ -691,6 +778,7 @@ private enum ConditionResolver {
             subjectNumberDigitCount: file.subjectNumberDigitCount,
             instructions: resolvedInstructions,
             debriefing: debriefing,
+            taskMode: file.taskMode,
             foveatedRendering: file.foveatedRendering ?? true,
             trials: trials
         )
@@ -791,6 +879,13 @@ private enum ConditionResolver {
         guard let fontName = patch.digits.fontName else { try missing("digits.font_name") }
         guard patch.digits.rgb != nil else { try missing("digits.rgb") }
         guard patch.digits.randomMethod != nil else { try missing("digits.random_method") }
+        guard let annotationHeight = patch.annotation.heightDegrees else {
+            try missing("annotation.height_degrees")
+        }
+        guard let annotationFontName = patch.annotation.fontName else {
+            try missing("annotation.font_name")
+        }
+        guard patch.annotation.rgb != nil else { try missing("annotation.rgb") }
         guard let tileWidth = patch.tiles.widthDegrees else { try missing("tiles.width_degrees") }
         guard let tileHeight = patch.tiles.heightDegrees else { try missing("tiles.height_degrees") }
         guard let tileGutter = patch.tiles.gutterDegrees else { try missing("tiles.gutter_degrees") }
@@ -850,6 +945,7 @@ private enum ConditionResolver {
 
         let positive: [(String, Float)] = [
             ("digits.height_degrees", digitHeight),
+            ("annotation.height_degrees", annotationHeight),
             ("tiles.width_degrees", tileWidth),
             ("tiles.height_degrees", tileHeight),
             ("fov.width_degrees", fovWidth),
@@ -902,8 +998,9 @@ private enum ConditionResolver {
             throw invalid(definitionName, "surround corner radius is too large.")
         }
         let spaceAboveCenteredGrid = (fovHeight - gridHeight) / 2
-        guard spaceAboveCenteredGrid >= digitHeight * 1.5 else {
-            let targetCueClearance = digitHeight * 1.5
+        let headingHeight = max(digitHeight, annotationHeight)
+        guard spaceAboveCenteredGrid >= headingHeight * 1.5 else {
+            let targetCueClearance = headingHeight * 1.5
             let minimumFOVHeight = gridHeight + targetCueClearance * 2
             throw invalid(
                 definitionName,
@@ -918,6 +1015,9 @@ private enum ConditionResolver {
         }
         guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw invalid(definitionName, "digits.font_name must not be empty.")
+        }
+        guard !annotationFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw invalid(definitionName, "annotation.font_name must not be empty.")
         }
     }
 
@@ -983,6 +1083,9 @@ private enum ConditionResolver {
                 digitFontName: patch.digits.fontName!,
                 digitRGB: patch.digits.rgb!,
                 digitRandomMethod: patch.digits.randomMethod!,
+                annotationHeightArcmin: patch.annotation.heightDegrees! * 60,
+                annotationFontName: patch.annotation.fontName!,
+                annotationRGB: patch.annotation.rgb!,
                 tileWidthArcmin: patch.tiles.widthDegrees! * 60,
                 tileHeightArcmin: patch.tiles.heightDegrees! * 60,
                 tileGutterArcmin: patch.tiles.gutterDegrees! * 60,
@@ -1035,7 +1138,7 @@ private enum JSONShapeValidator {
             root,
             allowed: [
                 "schema_version", "protocol_name", "subject_number_digit_count",
-                "instructions", "debriefing", "foveated_rendering", "conditions"
+                "instructions", "debriefing", "foveated_rendering", "task_mode", "conditions"
             ],
             path: "$"
         )
@@ -1047,13 +1150,18 @@ private enum JSONShapeValidator {
             let condition = try dictionary(rawCondition, path: path)
             try keys(
                 condition,
-                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "tiles", "surround", "fov", "speech"],
+                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "annotation", "tiles", "surround", "fov", "speech"],
                 path: path
             )
             try section(
                 condition["digits"],
                 path: "\(path).digits",
                 allowed: ["height_degrees", "font_name", "rgb", "random_method"]
+            )
+            try section(
+                condition["annotation"],
+                path: "\(path).annotation",
+                allowed: ["height_degrees", "font_name", "rgb"]
             )
             try section(
                 condition["tiles"],
@@ -1115,10 +1223,13 @@ private enum JSONShapeValidator {
 }
 
 private enum NumberGridGenerator {
-    static func makeGrid(using config: StimulusConfiguration) -> NumberGrid {
+    static func makeGrid(
+        using config: StimulusConfiguration,
+        randomSeed: UInt64
+    ) -> NumberGrid {
         let rows = config.numberOfTilesVertical
         let columns = config.numberOfTilesHorizontal
-        var random = SplitMix64(seed: config.randomSeed)
+        var random = SplitMix64(seed: randomSeed)
 
         while true {
             let targetNumber = makeTargetNumber(using: &random)

@@ -32,6 +32,7 @@ final class AppModel {
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
     private var backgroundObserverTask: Task<Void, Never>?
+    private var timedSessionTask: Task<Void, Never>?
     private var instantiatedExperiment: Experiment?
     private var preparedTrialRevision: Int?
     private var currentTrialMeasurement: InProgressTrialMeasurement?
@@ -40,7 +41,9 @@ final class AppModel {
     private var hasExperimentBegun = false
     private var hasStartedWindowlessExperience = false
     private var isAdvancingCompletedTrial = false
+    private var hasTimedSessionEnded = false
     private(set) var currentTrialIndex = 0
+    private(set) var completedTargetCount = 0
     private(set) var subjectNumber: String?
     private(set) var trialPhase: TrialPhase = .participantNumber
     var immersiveSpaceState: ImmersiveSpaceState = .closed
@@ -66,7 +69,13 @@ final class AppModel {
     }
 
     var hasCompletedExperiment: Bool {
-        plan != nil && currentTrialIndex >= trialCount
+        guard let plan else { return false }
+        switch plan.taskMode {
+        case .fixedNumberOfTrials:
+            return currentTrialIndex >= trialCount
+        case .loopTrials:
+            return hasTimedSessionEnded
+        }
     }
 
     var participantPrompt: StimulusPresentationState.Prompt? {
@@ -102,9 +111,15 @@ final class AppModel {
             )
         case .debriefing:
             guard let plan else { return nil }
+            let message: String
+            if case .loopTrials = plan.taskMode {
+                message = "Final score: \(completedTargetCount)\n\n\(plan.debriefing)"
+            } else {
+                message = plan.debriefing
+            }
             return .init(
                 title: "Experiment Complete",
-                message: plan.debriefing,
+                message: message,
                 usesLeadingAlignment: false
             )
         case .transitioning, .targetCue, .search:
@@ -117,14 +132,29 @@ final class AppModel {
         if instantiatedExperiment != nil {
             return true
         }
-        guard let plan, plan.trials.indices.contains(currentTrialIndex) else { return false }
-        let scheduledTrial = plan.trials[currentTrialIndex]
+        guard let plan, !plan.trials.isEmpty else { return false }
+        let scheduledIndex: Int
+        switch plan.taskMode {
+        case .fixedNumberOfTrials:
+            guard plan.trials.indices.contains(currentTrialIndex) else { return false }
+            scheduledIndex = currentTrialIndex
+        case .loopTrials:
+            scheduledIndex = currentTrialIndex % plan.trials.count
+        }
+        let scheduledTrial = plan.trials[scheduledIndex]
+        let trialNumber = currentTrialIndex + 1
         instantiatedExperiment = await Task.detached(priority: .userInitiated) {
-            scheduledTrial.instantiate()
+            scheduledTrial.instantiate(trialNumber: trialNumber)
         }.value
+        if hasCompletedExperiment {
+            instantiatedExperiment = nil
+            return true
+        }
         if let instantiatedExperiment {
             preparedTrialRevision = stimulusPresentationState.prepareTrial(
                 experiment: instantiatedExperiment,
+                taskMode: plan.taskMode,
+                score: completedTargetCount,
                 trialsRemaining: max(0, trialCount - currentTrialIndex)
             )
         }
@@ -252,6 +282,7 @@ final class AppModel {
                     self?.handleRecognitionEnded(error)
                 }
             )
+            startTimedSessionIfNeeded()
             switch trialPhase {
             case .participantNumber:
                 let digitCount = plan?.subjectNumberDigitCount ?? 3
@@ -360,6 +391,7 @@ final class AppModel {
                         speech: measurement.speech
                     )
                 )
+                completedTargetCount += 1
                 statusMessage = "Correct — heard \(candidate)."
                 scheduleCompletedTrialAdvance()
             } catch {
@@ -375,7 +407,11 @@ final class AppModel {
     }
 
     func advanceAfterCompletedTrial() {
-        guard let plan, currentTrialIndex < plan.trials.count else { return }
+        guard let plan, !hasTimedSessionEnded else { return }
+        if plan.taskMode == .fixedNumberOfTrials,
+           currentTrialIndex >= plan.trials.count {
+            return
+        }
         currentTrialIndex += 1
         instantiatedExperiment = nil
         preparedTrialRevision = nil
@@ -389,9 +425,15 @@ final class AppModel {
             } else {
                 statusMessage = "Experiment complete — all \(trialCount) trials finished."
             }
-        } else if plan.trials.indices.contains(currentTrialIndex) {
-            let trial = plan.trials[currentTrialIndex]
-            statusMessage = "Preparing trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."
+        } else {
+            switch plan.taskMode {
+            case .fixedNumberOfTrials:
+                let trial = plan.trials[currentTrialIndex]
+                statusMessage = "Preparing trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."
+            case .loopTrials:
+                let trial = plan.trials[currentTrialIndex % plan.trials.count]
+                statusMessage = "Preparing target \(currentTrialIndex + 1) (score \(completedTargetCount), \(trial.conditionName))."
+            }
         }
     }
 
@@ -481,7 +523,8 @@ final class AppModel {
 
         resultFileWriter.beginExperiment(
             protocolName: plan.protocolName,
-            subjectNumber: subjectNumber
+            subjectNumber: subjectNumber,
+            taskMode: plan.taskMode
         )
         hasExperimentBegun = true
         speechListener.stop()
@@ -517,7 +560,8 @@ final class AppModel {
 
         stopSpeechConfirmation()
 
-        let finishesExperiment = currentTrialIndex + 1 >= trialCount
+        let finishesExperiment = plan?.taskMode == .fixedNumberOfTrials
+            && currentTrialIndex + 1 >= trialCount
         if !finishesExperiment {
             beginTrialTransition()
             await Task.yield()
@@ -535,6 +579,7 @@ final class AppModel {
         }
 
         await waitForPreparedTrialResources()
+        guard !hasCompletedExperiment else { return }
         presentPreparedTrial()
         markCurrentTrialStartedIfReady()
         await startSpeechConfirmation()
@@ -548,10 +593,55 @@ final class AppModel {
         }
     }
 
+    private func startTimedSessionIfNeeded() {
+        guard let plan,
+              case .loopTrials(let seconds) = plan.taskMode,
+              hasExperimentBegun,
+              trialPhase == .targetCue || trialPhase == .search,
+              timedSessionTask == nil,
+              !hasTimedSessionEnded else { return }
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+        timedSessionTask = Task { @MainActor [weak self] in
+            do {
+                try await ContinuousClock().sleep(until: deadline)
+            } catch {
+                return
+            }
+            self?.finishTimedSession(durationSeconds: seconds)
+        }
+    }
+
+    private func finishTimedSession(durationSeconds: Int) {
+        guard !hasTimedSessionEnded else { return }
+        hasTimedSessionEnded = true
+        timedSessionTask = nil
+        speechRestartTask?.cancel()
+        speechRestartTask = nil
+        speechListener.stop()
+        currentTrialMeasurement = nil
+        trialPhase = .debriefing
+        stimulusPresentationState.hide()
+
+        do {
+            try resultFileWriter.finishTimedExperiment(
+                score: completedTargetCount,
+                durationSeconds: durationSeconds,
+                endTimeMS: elapsedMilliseconds()
+            )
+            statusMessage = "Time expired — final score: \(completedTargetCount)."
+        } catch {
+            statusMessage = "Time expired — final score: \(completedTargetCount), but the result couldn't be saved: \(error.localizedDescription)"
+            print("SmartFOV123 result error: \(error.localizedDescription)")
+        }
+        synchronizeParticipantPresentation()
+    }
+
     /// The Digital Crown returns the windowless experience to Home View,
     /// which backgrounds the research app. End the session at that point.
     private func terminateWhenBackgrounded() -> Never {
         speechListener.stop()
+        timedSessionTask?.cancel()
         speechRestartTask?.cancel()
         stimulusPresentationState.hide()
         exit(EXIT_SUCCESS)

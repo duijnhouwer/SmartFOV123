@@ -4,6 +4,8 @@ final class StimulusPresentationState: @unchecked Sendable {
     struct TrialRequest: Sendable {
         let revision: Int
         let experiment: Experiment
+        let taskMode: TaskMode
+        let score: Int
         let trialsRemaining: Int
     }
 
@@ -45,13 +47,20 @@ final class StimulusPresentationState: @unchecked Sendable {
         }
     }
 
-    func prepareTrial(experiment: Experiment, trialsRemaining: Int) -> Int {
+    func prepareTrial(
+        experiment: Experiment,
+        taskMode: TaskMode,
+        score: Int,
+        trialsRemaining: Int
+    ) -> Int {
         lock.withLock {
             let revision = nextTrialRevision
             nextTrialRevision += 1
             currentTrialRequest = .init(
                 revision: revision,
                 experiment: experiment,
+                taskMode: taskMode,
+                score: score,
                 trialsRemaining: trialsRemaining
             )
             readyTrialRevision = nil

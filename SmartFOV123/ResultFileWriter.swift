@@ -20,12 +20,14 @@ final class ResultFileWriter {
     func beginExperiment(
         protocolName: String,
         subjectNumber: String,
+        taskMode: TaskMode,
         startDate: Date? = nil
     ) {
         let startDate = startDate ?? now()
         experimentMetadata = .init(
             protocolName: protocolName,
             subjectNumber: subjectNumber,
+            taskMode: taskMode,
             startDate: startDate
         )
     }
@@ -41,9 +43,38 @@ final class ResultFileWriter {
         }
         let document = ResultDocument(
             experiment: experimentMetadata,
-            trials: completedTrials + [trial]
+            trials: completedTrials + [trial],
+            summary: nil
         )
+        try write(document, to: fileURL)
 
+        completedTrials.append(trial)
+    }
+
+    func finishTimedExperiment(
+        score: Int,
+        durationSeconds: Int,
+        endTimeMS: UInt64
+    ) throws {
+        let fileURL = try sessionFileURL()
+        guard let experimentMetadata else {
+            throw ResultFileError.experimentMetadataMissing
+        }
+        try write(
+            ResultDocument(
+                experiment: experimentMetadata,
+                trials: completedTrials,
+                summary: .init(
+                    score: score,
+                    durationSeconds: durationSeconds,
+                    endTimeMS: endTimeMS
+                )
+            ),
+            to: fileURL
+        )
+    }
+
+    private func write(_ document: ResultDocument, to fileURL: URL) throws {
         let data: Data
         do {
             data = try JSONPrettyPrinter.encode(document)
@@ -56,8 +87,6 @@ final class ResultFileWriter {
         } catch {
             throw ResultFileError.couldNotWrite(fileURL, error)
         }
-
-        completedTrials.append(trial)
     }
 
     private func sessionFileURL() throws -> URL {
@@ -121,19 +150,39 @@ final class ResultFileWriter {
 private struct ResultDocument: Encodable {
     let experiment: ResultExperiment
     let trials: [CompletedTrial]
+    let summary: ResultSummary?
+}
+
+private struct ResultSummary: Encodable {
+    let score: Int
+    let durationSeconds: Int
+    let endTimeMS: UInt64
+
+    private enum CodingKeys: String, CodingKey {
+        case score
+        case durationSeconds = "duration_seconds"
+        case endTimeMS = "end_time_ms"
+    }
 }
 
 private struct ResultExperiment: Encodable {
     let application = "SmartFOV123"
     let protocolName: String
     let subjectNumber: String
+    let taskMode: String?
     let startDate: String
     let startTime: String
     let timestamp: Date
 
-    init(protocolName: String, subjectNumber: String, startDate: Date) {
+    init(
+        protocolName: String,
+        subjectNumber: String,
+        taskMode: TaskMode,
+        startDate: Date
+    ) {
         self.protocolName = protocolName
         self.subjectNumber = subjectNumber
+        self.taskMode = taskMode.durationSeconds == nil ? nil : taskMode.rawValue
         timestamp = startDate
 
         let dateFormatter = DateFormatter()
@@ -155,6 +204,7 @@ private struct ResultExperiment: Encodable {
         case application
         case protocolName = "protocol_name"
         case subjectNumber = "subject_number"
+        case taskMode = "task_mode"
         case startDate = "start_date"
         case startTime = "start_time"
     }
@@ -233,6 +283,7 @@ private struct CompletedTrial: Encodable {
         let blockNumber: Int
         let randomSeed: UInt64
         let digits: Digits
+        let annotation: Annotation
         let tiles: Tiles
         let surround: Surround
         let fov: FOV
@@ -243,12 +294,17 @@ private struct CompletedTrial: Encodable {
             let stimulus = configuration.stimulus
             conditionName = experiment.conditionName
             blockNumber = experiment.blockNumber
-            randomSeed = stimulus.randomSeed
+            randomSeed = experiment.randomSeed
             digits = .init(
                 heightDegrees: stimulus.digitHeightArcmin / 60,
                 fontName: stimulus.digitFontName,
                 rgb: stimulus.digitRGB.array,
                 randomMethod: stimulus.digitRandomMethod.rawValue
+            )
+            annotation = .init(
+                heightDegrees: stimulus.annotationHeightArcmin / 60,
+                fontName: stimulus.annotationFontName,
+                rgb: stimulus.annotationRGB.array
             )
             tiles = .init(
                 widthDegrees: stimulus.tileWidthArcmin / 60,
@@ -281,7 +337,7 @@ private struct CompletedTrial: Encodable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case digits, tiles, surround, fov, speech
+            case digits, annotation, tiles, surround, fov, speech
             case conditionName = "condition_name"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
@@ -299,6 +355,18 @@ private struct CompletedTrial: Encodable {
             case heightDegrees = "height_degrees"
             case fontName = "font_name"
             case randomMethod = "random_method"
+        }
+    }
+
+    struct Annotation: Encodable {
+        let heightDegrees: Float
+        let fontName: String
+        let rgb: [Float]
+
+        private enum CodingKeys: String, CodingKey {
+            case rgb
+            case heightDegrees = "height_degrees"
+            case fontName = "font_name"
         }
     }
 
@@ -461,16 +529,20 @@ private enum JSONPrettyPrinter {
         let preferredOrder: [String]
 
         if dictionary.keys.contains("trials") {
-            preferredOrder = ["experiment", "trials"]
+            preferredOrder = ["experiment", "trials", "summary"]
         } else if dictionary.keys.contains("application") {
             preferredOrder = [
-                "application", "protocol_name", "subject_number", "start_date", "start_time"
+                "application", "protocol_name", "subject_number", "task_mode",
+                "start_date", "start_time"
             ]
+        } else if dictionary.keys.contains("duration_seconds") {
+            preferredOrder = ["score", "duration_seconds", "end_time_ms"]
         } else if dictionary.keys.contains("seeded_stimulus") {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_name") {
             preferredOrder = [
-                "condition_name", "block_nr", "random_seed", "digits", "tiles", "surround", "fov", "speech"
+                "condition_name", "block_nr", "random_seed", "digits", "annotation",
+                "tiles", "surround", "fov", "speech"
             ]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
