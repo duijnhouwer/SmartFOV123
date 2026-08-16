@@ -5,8 +5,6 @@ struct StimulusUniforms {
     float4x4 clipFromDevice;
     float2 centerMeters;
     float2 halfSizeMeters;
-    float2 fovCenterMeters;
-    float2 fovHalfSizeMeters;
     float distanceMeters;
 };
 
@@ -31,10 +29,6 @@ vertex VertexOut stimulusVertex(
 
     float2 deviceXY = uniforms.centerMeters
         + corners[vertexID] * uniforms.halfSizeMeters;
-    float2 normalizedFOV = (
-        deviceXY - (uniforms.fovCenterMeters - uniforms.fovHalfSizeMeters)
-    ) / (2.0 * uniforms.fovHalfSizeMeters);
-
     VertexOut out;
     out.position = uniforms.clipFromDevice * float4(
         deviceXY,
@@ -42,8 +36,8 @@ vertex VertexOut stimulusVertex(
         1.0
     );
     // Quartz bitmap rows and Metal texture coordinates use opposite vertical
-    // conventions, so invert V while mapping the completed FOV texture.
-    out.uv = float2(normalizedFOV.x, 1.0 - normalizedFOV.y);
+    // conventions, so invert V while mapping the completed stimulus texture.
+    out.uv = float2(corners[vertexID].x, -corners[vertexID].y) * 0.5 + 0.5;
     return out;
 }
 

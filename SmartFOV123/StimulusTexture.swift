@@ -20,9 +20,7 @@ struct StimulusTexture {
     ) throws {
         let config = experiment.configuration.stimulus
         let display = experiment.configuration.display
-        // Core Graphics antialiases glyph edges directly at the final texture
-        // resolution, so no separate CPU resampling pass is needed.
-        let pixelsPerBox = 128
+        let pixelsPerTile = 128
 
         let fovWidthMeters = Self.sizeMeters(
             degrees: config.fovWidthDegrees,
@@ -56,14 +54,14 @@ struct StimulusTexture {
         let width = max(
             1,
             Int(ceil(
-                Float(experiment.grid.columns * pixelsPerBox)
+                Float(experiment.grid.columns * pixelsPerTile)
                     * fovWidthMeters / gridWidthMeters
             ))
         )
         let height = max(
             1,
             Int(ceil(
-                Float(experiment.grid.rows * pixelsPerBox)
+                Float(experiment.grid.rows * pixelsPerTile)
                     * fovHeightMeters / gridHeightMeters
             ))
         )
@@ -260,7 +258,7 @@ struct StimulusTexture {
             throw StimulusTextureError.textureCreationFailed
         }
         let presentationLabel = presentation == .masked ? "masked" : "revealed"
-        texture.label = "Precomposed NumberFinder FOV (\(display.mode.rawValue), \(presentationLabel))"
+        texture.label = "Precomposed SmartFOV123 stimulus (\(display.mode.rawValue), \(presentationLabel))"
         pixels.withUnsafeBytes { bytes in
             texture.replace(
                 region: MTLRegionMake2D(0, 0, width, height),
@@ -274,7 +272,7 @@ struct StimulusTexture {
               let blitEncoder = commandBuffer.makeBlitCommandEncoder() else {
             throw StimulusTextureError.mipmapEncodingFailed
         }
-        blitEncoder.label = "SmartFOV123 FOV mipmap generation"
+        blitEncoder.label = "SmartFOV123 stimulus mipmap generation"
         blitEncoder.generateMipmaps(for: texture)
         blitEncoder.endEncoding()
         commandBuffer.commit()
@@ -342,9 +340,6 @@ struct StimulusTexture {
         2 * distance * tan(degrees * .pi / 360)
     }
 
-    private static func offsetMeters(degrees: Float, distance: Float) -> Float {
-        distance * tan(degrees * .pi / 180)
-    }
 }
 
 private extension RGB {
@@ -369,11 +364,11 @@ enum StimulusTextureError: LocalizedError {
         case .invalidFont(let name):
             return "The configured font ‘\(name)’ doesn't provide usable uppercase metrics."
         case .contextCreationFailed:
-            return "The app couldn't create the precomposed FOV drawing context."
+            return "The app couldn't create the precomposed stimulus drawing context."
         case .textureCreationFailed:
-            return "Metal couldn't create the precomposed FOV texture."
+            return "Metal couldn't create the precomposed stimulus texture."
         case .mipmapEncodingFailed:
-            return "Metal couldn't generate the FOV texture mipmaps."
+            return "Metal couldn't generate the stimulus texture mipmaps."
         }
     }
 }

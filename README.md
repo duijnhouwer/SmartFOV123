@@ -14,13 +14,13 @@ For example, if the target is `536` and the grid contains:
 
 the target runs vertically through the middle column, so the participant says “seven, three, eight.” Target placement always leaves room for this three-cell crossing, which means target centers never occur on a grid edge. The generator accepts a grid only when both the target number and its perpendicular confirmation number occur exactly once across all horizontal and vertical three-digit sequences.
 
-Use **Start sequence** in the launcher to grant microphone and speech-recognition access and begin. Before trial 1, a binocular, head-locked visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes, no, or quit. Saying no, or anything other than yes or quit, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin” or “Quit.” Saying quit closes the immersive space and launcher. Saying begin opens the experimental compositor space and starts trial timing. Each trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically to the next scheduled trial, so the participant does not need to look at the launcher again unless they want to stop. Trials have no automatic time limit.
+The app opens directly into a binocular, head-locked compositor experience. Before trial 1, a visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes or no. Saying no, or anything other than yes, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin.” Each trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically to the next scheduled trial. Trials have no automatic time limit. Pressing the Digital Crown backgrounds the windowless research app, which then deliberately terminates.
 
 Spoken forms are configured under `speech.aliases` in the master condition. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must resolve to at least one alias, and one alias cannot belong to multiple digits.
 
 ## Multi-trial configuration
 
-Schema version 5 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, and nonempty `instructions`. The name is copied into every result file; the other fields control participant-number collection and the pre-trial instruction card. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands to a unique immutable identity such as `condition1`, even when seeds or all resolved parameters are identical.
+Schema version 5 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, and nonempty `instructions` and `debriefing` text. `foveated_rendering` defaults to `true` and is disabled only when explicitly set to `false`. The protocol name is copied into every result file; the other fields control participant-number collection and the participant cards. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands to a unique immutable identity such as `condition1`, even when seeds or all resolved parameters are identical.
 
 `random_seed` accepts:
 
@@ -30,7 +30,7 @@ Schema version 5 uses snake_case property names and enum values. The root protoc
 
 Every instantiated condition requires `block_nr >= 1`. Used block numbers must begin at 1 and be consecutive without gaps. Blocks run in ascending order, and their trials are randomized within each block. Initial trial names (`trial1`, `trial2`, …) are assigned after scheduling and remain separate from condition identities so a future retry can create a new trial for an existing condition.
 
-The entire configuration and schedule are preflighted at app launch. Validation rejects malformed or unknown keys, incomplete master parameters, invalid or circular inheritance, illegal reserved names, duplicate expanded names, invalid repeats or seed arrays, nonconsecutive blocks, and invalid geometry, colors, or speech aliases. Both `boxes.number_horizontal` and `boxes.number_vertical` must be at least 4. If preflight fails, **Start trial** remains disabled and the launcher reports the configuration error.
+The entire configuration and schedule are preflighted at app launch. Validation rejects malformed or unknown keys, incomplete master parameters, invalid or circular inheritance, illegal reserved names, duplicate expanded names, invalid repeats or seed arrays, nonconsecutive blocks, and invalid geometry, colors, or speech aliases. Both `tiles.number_horizontal` and `tiles.number_vertical` must be at least 4. If preflight fails, the participant card reports the configuration error.
 
 Grid generation happens when each trial is about to run. The target is drawn first from that trial's seeded random-number generator. Candidate grids are then generated until both the target and its perpendicular response occur exactly once across all horizontal and vertical three-digit sequences. A rejected candidate advances the same deterministic random-number stream; it does not invalidate or abort the experiment.
 
@@ -73,7 +73,8 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "block_nr": 1,
         "random_seed": 123,
         "digits": { "...": "complete resolved digit parameters" },
-        "boxes": { "...": "complete resolved box parameters" },
+        "tiles": { "...": "complete resolved tile parameters" },
+        "surround": { "...": "complete resolved surround parameters" },
         "fov": { "...": "complete resolved FOV parameters" },
         "speech": { "...": "complete resolved speech parameters" }
       },
@@ -114,6 +115,6 @@ Each resolved condition selects one of two display models in its `fov` section:
 - `video_passthrough` gives every completed stimulus RGB value the same `peak_opacity`. Black remains visible and darkens passthrough. Use `peak_opacity: 1.0` for an opaque condition.
 - `optical_see_through_simulation` approximates an additive optical display. Opacity scales with the brightest RGB channel, so black is fully transparent and white receives `peak_opacity`.
 
-The app first draws the complete FOV—background, grid, and digits—into one 8×8-supersampled texture. It then converts every finished pixel to the selected display model before Metal presents the texture.
+The app draws the complete stimulus—surround, tile grid, and digits—directly into one sRGB texture. It then converts every finished pixel to the selected display model before Metal presents the texture.
 
 `peak_opacity` must be between `0.0` and `1.0`. This alpha-compositing model is an experimental simulation on video-passthrough hardware; it does not reproduce a physical optical display's luminance or contrast automatically.

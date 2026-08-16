@@ -30,11 +30,10 @@ final class ResultFileWriter {
         )
     }
 
-    @discardableResult
     func appendCompletedTrial(
         _ experiment: Experiment,
         results: CompletedTrialResults
-    ) throws -> URL {
+    ) throws {
         let fileURL = try sessionFileURL()
         let trial = CompletedTrial(experiment: experiment, results: results)
         guard let experimentMetadata else {
@@ -59,7 +58,6 @@ final class ResultFileWriter {
         }
 
         completedTrials.append(trial)
-        return fileURL
     }
 
     private func sessionFileURL() throws -> URL {

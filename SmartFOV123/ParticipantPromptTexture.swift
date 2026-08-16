@@ -64,18 +64,6 @@ struct ParticipantPromptTexture {
                 in: context
             )
 
-            if let emphasizedText = prompt.emphasizedText,
-               let emphasizedRect = layout.emphasizedRect {
-                Self.draw(
-                    emphasizedText,
-                    in: emphasizedRect,
-                    fontSize: 84,
-                    weight: .semibold,
-                    alignment: .center,
-                    in: context
-                )
-            }
-
             Self.draw(
                 prompt.message,
                 in: layout.messageRect,
@@ -123,13 +111,11 @@ struct ParticipantPromptTexture {
 
     private enum FontWeight {
         case regular
-        case semibold
         case bold
 
         var name: CFString {
             switch self {
             case .regular: return "HelveticaNeue" as CFString
-            case .semibold: return "HelveticaNeue-Medium" as CFString
             case .bold: return "HelveticaNeue-Bold" as CFString
             }
         }
@@ -139,7 +125,6 @@ struct ParticipantPromptTexture {
         let canvasSize: CGSize
         let panelRect: CGRect
         let titleRect: CGRect
-        let emphasizedRect: CGRect?
         let messageRect: CGRect
     }
 
@@ -149,7 +134,6 @@ struct ParticipantPromptTexture {
         let maxContentWidth: CGFloat = 1_100
         let minContentWidth: CGFloat = 560
         let titleFontSize: CGFloat = 58
-        let emphasizedFontSize: CGFloat = 84
         let messageFontSize: CGFloat = 37
         let sectionSpacing: CGFloat = 24
 
@@ -160,15 +144,6 @@ struct ParticipantPromptTexture {
             weight: .bold,
             alignment: .center
         )
-        let emphasizedSize = prompt.emphasizedText.map {
-            measure(
-                $0,
-                maxWidth: maxContentWidth,
-                fontSize: emphasizedFontSize,
-                weight: .semibold,
-                alignment: .center
-            )
-        }
         let preliminaryMessageSize = measure(
             prompt.message,
             maxWidth: maxContentWidth,
@@ -178,7 +153,7 @@ struct ParticipantPromptTexture {
         )
         let contentWidth = min(
             maxContentWidth,
-            [minContentWidth, titleSize.width, emphasizedSize?.width ?? 0, preliminaryMessageSize.width].max()!
+            max(minContentWidth, titleSize.width, preliminaryMessageSize.width)
         )
         let messageSize = measure(
             prompt.message,
@@ -190,7 +165,6 @@ struct ParticipantPromptTexture {
 
         let contentHeight = titleSize.height
             + sectionSpacing
-            + (emphasizedSize.map { $0.height + sectionSpacing } ?? 0)
             + messageSize.height
         let panelSize = CGSize(
             width: contentWidth + panelPadding * 2,
@@ -201,17 +175,6 @@ struct ParticipantPromptTexture {
         var cursorY = panelRect.maxY - panelPadding - titleSize.height
         let titleRect = CGRect(x: contentX, y: cursorY, width: contentWidth, height: titleSize.height)
         cursorY -= sectionSpacing
-        var emphasizedRect: CGRect?
-        if let emphasizedSize {
-            cursorY -= emphasizedSize.height
-            emphasizedRect = CGRect(
-                x: contentX,
-                y: cursorY,
-                width: contentWidth,
-                height: emphasizedSize.height
-            )
-            cursorY -= sectionSpacing
-        }
         cursorY -= messageSize.height
         let messageRect = CGRect(
             x: contentX,
@@ -227,7 +190,6 @@ struct ParticipantPromptTexture {
             ),
             panelRect: panelRect,
             titleRect: titleRect,
-            emphasizedRect: emphasizedRect,
             messageRect: messageRect
         )
     }

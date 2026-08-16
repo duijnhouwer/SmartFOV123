@@ -882,7 +882,7 @@ private enum ConditionResolver {
             throw invalid(definitionName, "tiles.number_vertical must be at least 4.")
         }
         guard columns <= 254, rows <= 254 else {
-            throw invalid(definitionName, "each box-grid dimension may be at most 254.")
+            throw invalid(definitionName, "each tile-grid dimension may be at most 254.")
         }
         guard tileGutter < min(tileWidth, tileHeight) else {
             throw invalid(definitionName, "tiles.gutter_degrees is too large for the tiles.")

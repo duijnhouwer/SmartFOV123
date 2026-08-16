@@ -152,12 +152,6 @@ final class SpeechConfirmationListener {
         stopRecognitionPass()
     }
 
-    /// Retained as an async boundary for callers transitioning between trials.
-    /// The persistent windowless scene must not deactivate its audio session.
-    func stopAndWaitForAudioSession() async {
-        stopRecognitionPass()
-    }
-
     private func stopRecognitionPass() {
         sessionID = nil
         audioBufferSink.route(to: nil)

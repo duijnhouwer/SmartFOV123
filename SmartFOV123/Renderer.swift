@@ -32,8 +32,6 @@ private struct StimulusUniforms {
     var clipFromDevice: simd_float4x4
     var centerMeters: SIMD2<Float>
     var halfSizeMeters: SIMD2<Float>
-    var fovCenterMeters: SIMD2<Float>
-    var fovHalfSizeMeters: SIMD2<Float>
     var distanceMeters: Float
 }
 
@@ -41,7 +39,6 @@ private struct StimulusGeometry {
     let distanceMeters: Float
     let fovCenterMeters: SIMD2<Float>
     let fovHalfSizeMeters: SIMD2<Float>
-    let gridCenterMeters: SIMD2<Float>
     let digitHeightMeters: Float
 
     init(configuration: StimulusConfiguration) {
@@ -66,7 +63,6 @@ private struct StimulusGeometry {
                 distance: configuration.distanceMeters
             ) / 2
         )
-        gridCenterMeters = fovCenterMeters
         digitHeightMeters = Self.sizeMeters(
             degrees: configuration.digitHeightArcmin / 60,
             distance: configuration.distanceMeters
@@ -126,7 +122,6 @@ private final class TrialResourceMailbox: @unchecked Sendable {
 }
 
 private enum RendererError: LocalizedError {
-    case experimentMissing
     case commandQueueCreationFailed
     case shaderLibraryMissing
     case shaderFunctionMissing(String)
@@ -138,8 +133,6 @@ private enum RendererError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .experimentMissing:
-            return "No valid experiment is available to render."
         case .commandQueueCreationFailed:
             return "Metal couldn't create a command queue."
         case .shaderLibraryMissing:
@@ -237,8 +230,6 @@ actor Renderer {
             visualPipelineState = try device.makeRenderPipelineState(
                 descriptor: makePipelineDescriptor(fragmentFunction: visualFragmentFunction)
             )
-        } catch let error as RendererError {
-            throw error
         } catch {
             throw RendererError.pipelineCreationFailed(error)
         }
@@ -684,14 +675,14 @@ actor Renderer {
         guard let geometry, let experiment else { return }
         let halfHeight = geometry.digitHeightMeters / 2
         let bottom = clipFromDevice * SIMD4<Float>(
-            geometry.gridCenterMeters.x,
-            geometry.gridCenterMeters.y - halfHeight,
+            geometry.fovCenterMeters.x,
+            geometry.fovCenterMeters.y - halfHeight,
             -geometry.distanceMeters,
             1
         )
         let top = clipFromDevice * SIMD4<Float>(
-            geometry.gridCenterMeters.x,
-            geometry.gridCenterMeters.y + halfHeight,
+            geometry.fovCenterMeters.x,
+            geometry.fovCenterMeters.y + halfHeight,
             -geometry.distanceMeters,
             1
         )
@@ -722,8 +713,6 @@ actor Renderer {
             clipFromDevice: clipFromDevice,
             centerMeters: center,
             halfSizeMeters: halfSize,
-            fovCenterMeters: center,
-            fovHalfSizeMeters: halfSize,
             distanceMeters: distance
         )
         encoder.setVertexBytes(

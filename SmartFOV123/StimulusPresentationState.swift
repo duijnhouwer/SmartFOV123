@@ -10,7 +10,6 @@ final class StimulusPresentationState: @unchecked Sendable {
     struct Prompt: Equatable, Sendable {
         let title: String
         let message: String
-        let emphasizedText: String?
         let usesLeadingAlignment: Bool
     }
 
