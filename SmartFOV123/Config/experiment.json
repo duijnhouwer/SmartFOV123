@@ -64,11 +64,12 @@
           "metronome": {
               "start_seconds":    [ 0, 30, 60, 90, 120, 150, 180, 210, 240, 270],
               "beats_per_minute": [60, 66, 72, 80,  88,  98, 110, 124, 140, 160],
-              "volume": 0.5
+              "volume": 0.3
           },
           "final_gong": true
       },
       "speech": {
+        "reset_seconds": 2,
         "aliases": {
           "0": ["zero", "oh", "o"],
           "1": ["one", "won"],
