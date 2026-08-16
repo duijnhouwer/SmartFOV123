@@ -27,12 +27,15 @@ final class AppModel {
     let plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
+    private let metronomePlayer = MetronomePlayer()
     private let resultFileWriter = ResultFileWriter()
     private let speechListener = SpeechConfirmationListener()
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
+    private var speechPartialResetTask: Task<Void, Never>?
     private var backgroundObserverTask: Task<Void, Never>?
     private var timedSessionTask: Task<Void, Never>?
+    private var timedSessionUsesFinalGong = false
     private var instantiatedExperiment: Experiment?
     private var preparedTrialRevision: Int?
     private var currentTrialMeasurement: InProgressTrialMeasurement?
@@ -111,14 +114,12 @@ final class AppModel {
             )
         case .debriefing:
             guard let plan else { return nil }
-            let message: String
-            if case .loopTrials = plan.taskMode {
-                message = "Final score: \(completedTargetCount)\n\n\(plan.debriefing)"
-            } else {
-                message = plan.debriefing
-            }
+            let message = plan.debriefing.replacingOccurrences(
+                of: "<NUMBER_OF_TARGETS_FOUND>",
+                with: String(completedTargetCount)
+            )
             return .init(
-                title: "Experiment Complete",
+                title: plan.debriefingTitle,
                 message: message,
                 usesLeadingAlignment: false
             )
@@ -269,6 +270,8 @@ final class AppModel {
     }
 
     func startSpeechConfirmation() async {
+        speechPartialResetTask?.cancel()
+        speechPartialResetTask = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         guard trialPhase != .configurationError, trialPhase != .debriefing else { return }
@@ -313,6 +316,8 @@ final class AppModel {
     }
 
     func stopSpeechConfirmation() {
+        speechPartialResetTask?.cancel()
+        speechPartialResetTask = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         speechListener.stop()
@@ -338,17 +343,28 @@ final class AppModel {
             break
         }
 
+        let aliasLookup = experiment.configuration.speech.aliasLookup
+        speechPartialResetTask?.cancel()
+        speechPartialResetTask = nil
         guard let candidate = SpokenDigitParser.parseThreeDigits(
             from: transcript,
-            aliases: experiment.configuration.speech.aliasLookup
+            aliases: aliasLookup
         ) else {
+            if SpokenDigitParser.incompleteDigitCount(
+                from: transcript,
+                aliases: aliasLookup
+            ) != nil {
+                scheduleIncompleteSpeechReset(
+                    afterSeconds: experiment.configuration.speech.resetSeconds
+                )
+            }
             return
         }
         currentTrialMeasurement?.speech.append(
             .init(
                 utterance: SpokenDigitParser.normalizedForStorage(
                     transcript,
-                    aliases: experiment.configuration.speech.aliasLookup
+                    aliases: aliasLookup
                 ),
                 ms: elapsedMilliseconds()
             )
@@ -459,6 +475,22 @@ final class AppModel {
             guard !Task.isCancelled,
                   let self,
                   self.immersiveSpaceState == .open else { return }
+            await self.startSpeechConfirmation()
+        }
+    }
+
+    private func scheduleIncompleteSpeechReset(afterSeconds delay: Float) {
+        speechPartialResetTask?.cancel()
+        speechPartialResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(Double(delay) * 1_000_000_000)
+            )
+            guard !Task.isCancelled,
+                  let self,
+                  self.immersiveSpaceState == .open,
+                  self.trialPhase == .targetCue || self.trialPhase == .search else { return }
+            self.speechPartialResetTask = nil
+            self.speechListener.pauseForFeedback()
             await self.startSpeechConfirmation()
         }
     }
@@ -601,13 +633,20 @@ final class AppModel {
               timedSessionTask == nil,
               !hasTimedSessionEnded else { return }
 
-        let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+        let durationNanoseconds = UInt64(seconds) * 1_000_000_000
+        stimulusPresentationState.startTimeBar(durationSeconds: seconds)
+        if let stimulus = instantiatedExperiment?.configuration.stimulus {
+            timedSessionUsesFinalGong = stimulus.finalGong
+            metronomePlayer.start(
+                startSeconds: stimulus.metronomeStartSeconds,
+                beatsPerMinute: stimulus.metronomeBeatsPerMinute,
+                volume: stimulus.metronomeVolume,
+                durationSeconds: seconds
+            )
+        }
         timedSessionTask = Task { @MainActor [weak self] in
-            do {
-                try await ContinuousClock().sleep(until: deadline)
-            } catch {
-                return
-            }
+            try? await Task.sleep(nanoseconds: durationNanoseconds)
+            guard !Task.isCancelled else { return }
             self?.finishTimedSession(durationSeconds: seconds)
         }
     }
@@ -615,6 +654,8 @@ final class AppModel {
     private func finishTimedSession(durationSeconds: Int) {
         guard !hasTimedSessionEnded else { return }
         hasTimedSessionEnded = true
+        stimulusPresentationState.stopTimeBar()
+        metronomePlayer.finishSession()
         timedSessionTask = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
@@ -635,12 +676,17 @@ final class AppModel {
             print("SmartFOV123 result error: \(error.localizedDescription)")
         }
         synchronizeParticipantPresentation()
+        if timedSessionUsesFinalGong {
+            metronomePlayer.playGong()
+        }
+        timedSessionUsesFinalGong = false
     }
 
     /// The Digital Crown returns the windowless experience to Home View,
     /// which backgrounds the research app. End the session at that point.
     private func terminateWhenBackgrounded() -> Never {
         speechListener.stop()
+        metronomePlayer.stop()
         timedSessionTask?.cancel()
         speechRestartTask?.cancel()
         stimulusPresentationState.hide()

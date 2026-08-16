@@ -125,6 +125,17 @@ struct StimulusTexture {
                 dy: surroundInnerMarginHeight
             )
 
+            let timeBarBackHeight = CGFloat(Self.sizeMeters(
+                degrees: config.timeBarBackHeightArcmin / 60,
+                distance: config.distanceMeters
+            )) * scaleY
+            let timeBarBackRect = CGRect(
+                x: innerMarginRect.minX,
+                y: innerMarginRect.minY - timeBarBackHeight,
+                width: innerMarginRect.width,
+                height: timeBarBackHeight
+            )
+
             let cornerRadiusMeters = Self.sizeMeters(
                 degrees: config.tileCornerRadiusArcmin / 60,
                 distance: config.distanceMeters
@@ -183,6 +194,24 @@ struct StimulusTexture {
             }
             context.restoreGState()
 
+            if case .loopTrials = taskMode {
+                let backCornerRadius = min(
+                    CGFloat(Self.sizeMeters(
+                        degrees: config.timeBarBackCornerRadiusArcmin / 60,
+                        distance: config.distanceMeters
+                    )) * (scaleX + scaleY) / 2,
+                    min(timeBarBackRect.width, timeBarBackRect.height) / 2
+                )
+                context.setFillColor(config.timeBarBackRGB.cgColor)
+                context.addPath(CGPath(
+                    roundedRect: timeBarBackRect,
+                    cornerWidth: backCornerRadius,
+                    cornerHeight: backCornerRadius,
+                    transform: nil
+                ))
+                context.fillPath()
+            }
+
             let desiredDigitCapHeight = CGFloat(
                 Self.sizeMeters(
                     degrees: config.digitHeightArcmin / 60,
@@ -211,7 +240,7 @@ struct StimulusTexture {
             let annotationAttributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): annotationFont,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
-                    config.annotationRGB.cgColor
+                    config.annotationFontRGB.cgColor
             ]
 
             let headingY = innerMarginRect.maxY + desiredAnnotationCapHeight
@@ -368,7 +397,7 @@ struct StimulusTexture {
         )
     }
 
-    private static func applyDisplayModel(
+    static func applyDisplayModel(
         _ display: DisplayConfiguration,
         to pixels: inout [UInt8]
     ) {

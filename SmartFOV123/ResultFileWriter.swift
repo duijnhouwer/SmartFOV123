@@ -284,6 +284,7 @@ private struct CompletedTrial: Encodable {
         let randomSeed: UInt64
         let digits: Digits
         let annotation: Annotation
+        let timer: Timer
         let tiles: Tiles
         let surround: Surround
         let fov: FOV
@@ -304,7 +305,22 @@ private struct CompletedTrial: Encodable {
             annotation = .init(
                 heightDegrees: stimulus.annotationHeightArcmin / 60,
                 fontName: stimulus.annotationFontName,
-                rgb: stimulus.annotationRGB.array
+                fontRGB: stimulus.annotationFontRGB.array
+            )
+            timer = .init(
+                bar: .init(
+                    fillRGB: stimulus.timeBarFillRGB.array,
+                    heightDegrees: stimulus.timeBarHeightArcmin / 60,
+                    backRGB: stimulus.timeBarBackRGB.array,
+                    backHeightDegrees: stimulus.timeBarBackHeightArcmin / 60,
+                    backCornerRadius: stimulus.timeBarBackCornerRadiusArcmin / 60
+                ),
+                metronome: .init(
+                    startSeconds: stimulus.metronomeStartSeconds,
+                    beatsPerMinute: stimulus.metronomeBeatsPerMinute,
+                    volume: stimulus.metronomeVolume
+                ),
+                finalGong: stimulus.finalGong
             )
             tiles = .init(
                 widthDegrees: stimulus.tileWidthArcmin / 60,
@@ -333,11 +349,14 @@ private struct CompletedTrial: Encodable {
                 verticalOffsetDegrees: stimulus.fovVerticalOffsetDegrees,
                 distanceMeters: stimulus.distanceMeters
             )
-            speech = .init(aliases: configuration.speech.digitAliases)
+            speech = .init(
+                aliases: configuration.speech.digitAliases,
+                resetSeconds: configuration.speech.resetSeconds
+            )
         }
 
         private enum CodingKeys: String, CodingKey {
-            case digits, annotation, tiles, surround, fov, speech
+            case digits, annotation, timer, tiles, surround, fov, speech
             case conditionName = "condition_name"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
@@ -361,12 +380,51 @@ private struct CompletedTrial: Encodable {
     struct Annotation: Encodable {
         let heightDegrees: Float
         let fontName: String
-        let rgb: [Float]
+        let fontRGB: [Float]
 
         private enum CodingKeys: String, CodingKey {
-            case rgb
+            case fontRGB = "font_rgb"
             case heightDegrees = "height_degrees"
             case fontName = "font_name"
+        }
+    }
+
+    struct TimeBar: Encodable {
+        let fillRGB: [Float]
+        let heightDegrees: Float
+        let backRGB: [Float]
+        let backHeightDegrees: Float
+        let backCornerRadius: Float
+
+        private enum CodingKeys: String, CodingKey {
+            case fillRGB = "fill_rgb"
+            case heightDegrees = "height_degrees"
+            case backRGB = "back_rgb"
+            case backHeightDegrees = "back_height_degrees"
+            case backCornerRadius = "back_corner_radius"
+        }
+    }
+
+    struct Timer: Encodable {
+        let bar: TimeBar
+        let metronome: Metronome
+        let finalGong: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case bar, metronome
+            case finalGong = "final_gong"
+        }
+    }
+
+    struct Metronome: Encodable {
+        let startSeconds: [Int]
+        let beatsPerMinute: [Int]
+        let volume: Float
+
+        private enum CodingKeys: String, CodingKey {
+            case startSeconds = "start_seconds"
+            case beatsPerMinute = "beats_per_minute"
+            case volume
         }
     }
 
@@ -431,6 +489,12 @@ private struct CompletedTrial: Encodable {
 
     struct Speech: Encodable {
         let aliases: [String: [String]]
+        let resetSeconds: Float
+
+        private enum CodingKeys: String, CodingKey {
+            case aliases
+            case resetSeconds = "reset_seconds"
+        }
     }
 }
 
@@ -541,17 +605,26 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_name") {
             preferredOrder = [
-                "condition_name", "block_nr", "random_seed", "digits", "annotation",
+                "condition_name", "block_nr", "random_seed", "digits", "annotation", "timer",
                 "tiles", "surround", "fov", "speech"
             ]
+        } else if dictionary.keys.contains("metronome") {
+            preferredOrder = ["bar", "metronome", "final_gong"]
+        } else if dictionary.keys.contains("beats_per_minute") {
+            preferredOrder = ["start_seconds", "beats_per_minute", "volume"]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
         } else if dictionary.keys.contains("start_time_ms") {
             preferredOrder = ["start_time_ms", "digit_reveal_ms", "target_found_ms", "speech"]
         } else if dictionary.keys.contains("utterance") {
             preferredOrder = ["utterance", "ms"]
+        } else if dictionary.keys.contains("back_height_degrees") {
+            preferredOrder = [
+                "fill_rgb", "height_degrees", "back_rgb", "back_height_degrees",
+                "back_corner_radius"
+            ]
         } else if dictionary.keys.contains("font_name") {
-            preferredOrder = ["height_degrees", "font_name", "rgb", "random_method"]
+            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method"]
         } else if dictionary.keys.contains("number_horizontal") {
             preferredOrder = [
                 "width_degrees", "height_degrees", "gutter_degrees", "corner_radius_degrees",
@@ -569,7 +642,7 @@ private enum JSONPrettyPrinter {
                 "inner_corner_radius_degrees", "outer_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("aliases") {
-            preferredOrder = ["aliases"]
+            preferredOrder = ["aliases", "reset_seconds"]
         } else {
             preferredOrder = []
         }

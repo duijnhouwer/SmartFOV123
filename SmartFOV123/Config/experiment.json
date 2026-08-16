@@ -3,9 +3,10 @@
   "protocol_name": "example",
   "subject_number_digit_count": 3,
   "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nNumbers must be spoken one digit at time.\n\nThe next target appears automatically after a correct response.\n\nFind as many targets as possible before time runs out.",
-  "debriefing": "Thank you for your participation!\n\nPress the Digital Crown to return to Home View.",
+  "debriefing_title": "Time's up!",
+  "debriefing": "Your score is <NUMBER_OF_TARGETS_FOUND>. Well done!\n\nPress the Digital Crown to exit",
   "foveated_rendering": true,
-  "task_mode": "loop_trials_300_seconds",
+  "task_mode": "loop_trials_60_seconds",
 
   "conditions": [
     {
@@ -50,7 +51,22 @@
       "annotation": {
         "height_degrees": 0.6,
         "font_name": "Arial",
-        "rgb": [0, 0, 0]
+        "font_rgb": [0, 0, 0]
+      },
+      "timer": {
+          "bar": {
+              "fill_rgb": [1, 1, 1],
+              "height_degrees": 0.6,
+              "back_rgb": [0, 0, 0],
+              "back_height_degrees": 1.0,
+              "back_corner_radius": 0.5
+          },
+          "metronome": {
+              "start_seconds":    [ 0, 30, 60, 90, 120, 150, 180, 210, 240, 270],
+              "beats_per_minute": [60, 66, 72, 80,  88,  98, 110, 124, 140, 160],
+              "volume": 0.5
+          },
+          "final_gong": true
       },
       "speech": {
         "aliases": {

@@ -40,6 +40,10 @@ private struct StimulusGeometry {
     let fovCenterMeters: SIMD2<Float>
     let fovHalfSizeMeters: SIMD2<Float>
     let digitHeightMeters: Float
+    let timeBarLeftMeters: Float
+    let timeBarCenterYMeters: Float
+    let timeBarWidthMeters: Float
+    let timeBarHalfHeightMeters: Float
 
     init(configuration: StimulusConfiguration) {
         distanceMeters = configuration.distanceMeters
@@ -67,6 +71,37 @@ private struct StimulusGeometry {
             degrees: configuration.digitHeightArcmin / 60,
             distance: configuration.distanceMeters
         )
+        let tileWidthMeters = Self.sizeMeters(
+            degrees: configuration.tileWidthArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+        let tileHeightMeters = Self.sizeMeters(
+            degrees: configuration.tileHeightArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+        let gutterMeters = Self.sizeMeters(
+            degrees: configuration.tileGutterArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+        let innerMarginMeters = Self.sizeMeters(
+            degrees: configuration.surroundInnerMarginArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+        let backHeightMeters = Self.sizeMeters(
+            degrees: configuration.timeBarBackHeightArcmin / 60,
+            distance: configuration.distanceMeters
+        )
+        timeBarWidthMeters = tileWidthMeters * Float(configuration.numberOfTilesHorizontal)
+            + gutterMeters * Float(configuration.numberOfTilesHorizontal - 1)
+        timeBarLeftMeters = fovCenterMeters.x - timeBarWidthMeters / 2
+        let gridHeightMeters = tileHeightMeters * Float(configuration.numberOfTilesVertical)
+            + gutterMeters * Float(configuration.numberOfTilesVertical - 1)
+            + innerMarginMeters * 2
+        timeBarCenterYMeters = fovCenterMeters.y - gridHeightMeters / 2 - backHeightMeters / 2
+        timeBarHalfHeightMeters = Self.sizeMeters(
+            degrees: configuration.timeBarHeightArcmin / 60,
+            distance: configuration.distanceMeters
+        ) / 2
     }
 
     private static func sizeMeters(degrees: Float, distance: Float) -> Float {
@@ -84,6 +119,8 @@ private struct TrialRenderResources: @unchecked Sendable {
     let geometry: StimulusGeometry
     let maskedTexture: StimulusTexture
     let revealedTexture: StimulusTexture
+    let timeBarTexture: TimeBarTexture?
+    let taskMode: TaskMode
 }
 
 private final class TrialResourceMailbox: @unchecked Sendable {
@@ -167,6 +204,8 @@ actor Renderer {
     private let depthState: MTLDepthStencilState
     private var maskedStimulusTexture: StimulusTexture?
     private var revealedStimulusTexture: StimulusTexture?
+    private var timeBarTexture: TimeBarTexture?
+    private var taskMode: TaskMode = .fixedNumberOfTrials
     private let presentationState: StimulusPresentationState
     private let trialResourceMailbox = TrialResourceMailbox()
     private var loadedTrialRevision: Int?
@@ -200,6 +239,7 @@ actor Renderer {
         self.commandQueue = commandQueue
         self.maskedStimulusTexture = nil
         self.revealedStimulusTexture = nil
+        self.timeBarTexture = nil
 
         guard let library = device.makeDefaultLibrary() else {
             throw RendererError.shaderLibraryMissing
@@ -351,6 +391,8 @@ actor Renderer {
                 geometry = resources.geometry
                 maskedStimulusTexture = resources.maskedTexture
                 revealedStimulusTexture = resources.revealedTexture
+                timeBarTexture = resources.timeBarTexture
+                taskMode = resources.taskMode
                 loadedTrialRevision = resources.revision
                 loggedProjectionEyes.removeAll()
                 presentationState.markTrialReady(revision: resources.revision)
@@ -399,7 +441,14 @@ actor Renderer {
                         score: request.score,
                         trialsRemaining: request.trialsRemaining,
                         presentation: .revealed
-                    )
+                    ),
+                    timeBarTexture: request.taskMode.durationSeconds == nil
+                        ? nil
+                        : try TimeBarTexture(
+                            device: device,
+                            configuration: request.experiment.configuration
+                        ),
+                    taskMode: request.taskMode
                 )
                 mailbox.finish(.success(resources))
             } catch {
@@ -470,6 +519,7 @@ actor Renderer {
         let surfaceTexture: MTLTexture?
         let presentationContent = presentationState.content
         let rendersSurface: Bool
+        let rendersTimeBar: Bool
         let rendersBinocularly: Bool
         let surfaceCenter: SIMD2<Float>
         let surfaceHalfSize: SIMD2<Float>
@@ -478,6 +528,7 @@ actor Renderer {
         case .hidden:
             surfaceTexture = maskedStimulusTexture?.texture
             rendersSurface = false
+            rendersTimeBar = false
             rendersBinocularly = false
             surfaceCenter = geometry?.fovCenterMeters ?? .zero
             surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
@@ -497,6 +548,7 @@ actor Renderer {
             }
             surfaceTexture = participantPromptTexture?.texture
             rendersSurface = participantPromptTexture != nil
+            rendersTimeBar = false
             rendersBinocularly = true
             surfaceCenter = .zero
             surfaceHalfSize = participantPromptTexture?.halfSizeMeters ?? SIMD2<Float>(0.465, 0.332)
@@ -504,6 +556,7 @@ actor Renderer {
         case .maskedGrid:
             surfaceTexture = maskedStimulusTexture?.texture
             rendersSurface = maskedStimulusTexture != nil && geometry != nil
+            rendersTimeBar = true
             rendersBinocularly = false
             surfaceCenter = geometry?.fovCenterMeters ?? .zero
             surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
@@ -511,6 +564,7 @@ actor Renderer {
         case .revealedGrid:
             surfaceTexture = revealedStimulusTexture?.texture
             rendersSurface = revealedStimulusTexture != nil && geometry != nil
+            rendersTimeBar = true
             rendersBinocularly = false
             surfaceCenter = geometry?.fovCenterMeters ?? .zero
             surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
@@ -520,6 +574,9 @@ actor Renderer {
         #if !targetEnvironment(simulator)
         if let surfaceTexture {
             residencySet.addAllocation(surfaceTexture)
+        }
+        if let timeBarTexture {
+            residencySet.addAllocation(timeBarTexture.texture)
         }
         for drawable in drawables {
             for texture in drawable.colorTextures {
@@ -548,6 +605,7 @@ actor Renderer {
                 into: commandBuffer,
                 surfaceTexture: surfaceTexture,
                 rendersSurface: rendersSurface,
+                rendersTimeBar: rendersTimeBar,
                 rendersBinocularly: rendersBinocularly,
                 surfaceCenter: surfaceCenter,
                 surfaceHalfSize: surfaceHalfSize,
@@ -570,6 +628,7 @@ actor Renderer {
         into commandBuffer: MTLCommandBuffer,
         surfaceTexture: MTLTexture?,
         rendersSurface: Bool,
+        rendersTimeBar: Bool,
         rendersBinocularly: Bool,
         surfaceCenter: SIMD2<Float>,
         surfaceHalfSize: SIMD2<Float>,
@@ -632,6 +691,28 @@ actor Renderer {
                     halfSize: surfaceHalfSize,
                     distance: surfaceDistance
                 )
+            }
+            if rendersTimeBar,
+               case .loopTrials = taskMode,
+               let timeBarTexture,
+               let geometry,
+               (rendersBinocularly
+                    || shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform)) {
+                let fraction = min(max(presentationState.timeBarFillFraction, 0), 1)
+                let width = geometry.timeBarWidthMeters * fraction
+                if width > 0 {
+                    encoder.setFragmentTexture(timeBarTexture.texture, index: 0)
+                    drawTexturedQuad(
+                        encoder: encoder,
+                        clipFromDevice: clipFromDevice,
+                        center: SIMD2(
+                            geometry.timeBarLeftMeters + width / 2,
+                            geometry.timeBarCenterYMeters
+                        ),
+                        halfSize: SIMD2(width / 2, geometry.timeBarHalfHeightMeters),
+                        distance: geometry.distanceMeters
+                    )
+                }
             }
             encoder.endEncoding()
         }

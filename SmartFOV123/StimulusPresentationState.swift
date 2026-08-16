@@ -28,6 +28,8 @@ final class StimulusPresentationState: @unchecked Sendable {
     private var nextTrialRevision = 1
     private var readyTrialRevision: Int?
     private var rendererRunning = false
+    private var timeBarStartUptimeNanoseconds: UInt64?
+    private var timeBarDurationNanoseconds: UInt64?
 
     var content: Content {
         lock.withLock { currentContent }
@@ -39,6 +41,30 @@ final class StimulusPresentationState: @unchecked Sendable {
 
     var isRendererRunning: Bool {
         lock.withLock { rendererRunning }
+    }
+
+    var timeBarFillFraction: Float {
+        lock.withLock {
+            guard let start = timeBarStartUptimeNanoseconds,
+                  let duration = timeBarDurationNanoseconds, duration > 0 else { return 1 }
+            let now = DispatchTime.now().uptimeNanoseconds
+            let elapsed = now >= start ? now - start : 0
+            return Float(max(0, 1 - Double(elapsed) / Double(duration)))
+        }
+    }
+
+    func startTimeBar(durationSeconds: Int) {
+        lock.withLock {
+            timeBarStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
+            timeBarDurationNanoseconds = UInt64(durationSeconds) * 1_000_000_000
+        }
+    }
+
+    func stopTimeBar() {
+        lock.withLock {
+            timeBarStartUptimeNanoseconds = nil
+            timeBarDurationNanoseconds = nil
+        }
     }
 
     func markRendererRunning() {

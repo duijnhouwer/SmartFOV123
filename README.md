@@ -20,13 +20,17 @@ Spoken forms are configured under `speech.aliases` in the master condition. Add 
 
 ## Multi-trial configuration
 
-Schema version 5 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, nonempty `instructions` and `debriefing` text, and `task_mode`. Use `"fixed_number_of_trials"` for the original behavior or `"loop_trials_<seconds>_seconds"`—for example, `"loop_trials_300_seconds"`—to loop the specified schedule for a positive integer countdown. `foveated_rendering` defaults to `true` and is disabled only when explicitly set to `false`. The protocol name is copied into every result file; the other fields control participant-number collection and the participant cards. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter, including the `annotation` height, font, and RGB used by labels outside the target grid. Named templates can inherit from it and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands into a scheduled condition such as `condition1`.
+Schema version 5 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, nonempty `instructions`, `debriefing_title`, and `debriefing` text, and `task_mode`. Use `"fixed_number_of_trials"` for the original behavior or `"loop_trials_<seconds>_seconds"`—for example, `"loop_trials_300_seconds"`—to loop the specified schedule for a positive integer countdown. `foveated_rendering` defaults to `true` and is disabled only when explicitly set to `false`. The protocol name is copied into every result file; the other fields control participant-number collection and the participant cards. `<NUMBER_OF_TARGETS_FOUND>` in the debriefing is replaced with the final score. The first condition must be `master`, inherit `null`, set `block_nr` and `random_seed` to `null`, set `repeats` to `0`, and define every parameter, including `annotation` (label height, font, and `font_rgb`) and `timer`. `timer.bar` defines the countdown background and fill; its optional `back_corner_radius` defaults to `tiles.corner_radius_degrees`. The stationary background is part of the trial texture, while the square-ended fill is resized by the renderer every frame in loop-trials mode. `timer.metronome` defines equal-length `start_seconds` and `beats_per_minute` arrays; each start time begins its corresponding tempo stage, and `final_gong` optionally plays `gong.caf` when the final-score prompt opens. Named templates can inherit from the master and override individual nested values. A concrete definition uses `__condition_nr__`; every repetition expands into a scheduled condition such as `condition1`.
 
 `random_seed` accepts:
 
 - `"shuffle"` for a fresh random seed per repetition.
 - One unsigned integer, reused for every repetition.
 - An unsigned-integer array whose length must equal `repeats`.
+
+Negative `timer.metronome.start_seconds` values disable their paired BPM stages; setting every start negative suppresses the metronome. `timer.metronome.volume` scales the peak-normalized tick and tock assets from silence (`0`) through full amplitude (`1`). `timer.final_gong` controls whether `gong.caf` plays when the final-score prompt opens.
+
+`speech.reset_seconds` controls how long an incomplete one- or two-digit trial response may remain idle before its recognition pass is restarted and forgotten. It defaults to `2` when omitted.
 
 Every instantiated condition requires `block_nr >= 1`. Used block numbers must begin at 1 and be consecutive without gaps. Blocks run in ascending order, and their trials are randomized within each block. Fixed-trial mode runs that schedule once. Loop-trials mode cycles the scheduled order until its deadline, reusing each trial's configured random seed on every pass. Use `"shuffle"` when you want each scheduled trial to receive a unique seed at experiment creation; use a fixed seed or a seed list when you intentionally want repeats. Trial names (`trial1`, `trial2`, …) remain unique when loop-trials mode revisits a source condition.
 
@@ -75,6 +79,10 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "random_seed": 123,
         "digits": { "...": "complete resolved digit parameters" },
         "annotation": { "...": "complete resolved annotation parameters" },
+        "timer": {
+          "bar": { "...": "complete resolved time-bar parameters" },
+          "metronome": { "...": "complete resolved tempo progression" }
+        },
         "tiles": { "...": "complete resolved tile parameters" },
         "surround": { "...": "complete resolved surround parameters" },
         "fov": { "...": "complete resolved FOV parameters" },

@@ -62,6 +62,19 @@ enum SpokenDigitParser {
         return nil
     }
 
+    static func incompleteDigitCount(
+        from transcript: String,
+        aliases: [String: Int]
+    ) -> Int? {
+        let tokens = transcript
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+        guard let flattened = flattenDigitTokens(tokens, aliases: aliases),
+              (1...2).contains(flattened.count) else { return nil }
+        return flattened.count
+    }
+
     static func normalizedForStorage(
         _ transcript: String,
         aliases: [String: Int]
