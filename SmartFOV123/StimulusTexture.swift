@@ -7,6 +7,7 @@ struct StimulusTexture {
     enum Presentation {
         case masked
         case revealed
+        case highlighted
     }
 
     let texture: MTLTexture
@@ -228,12 +229,24 @@ struct StimulusTexture {
                 named: config.digitFontName,
                 capHeight: desiredDigitCapHeight
             )
+            let boldDigitFont = CTFontCreateCopyWithSymbolicTraits(
+                digitFont,
+                0,
+                nil,
+                .traitBold,
+                .traitBold
+            ) ?? digitFont
             let annotationFont = try Self.font(
                 named: config.annotationFontName,
                 capHeight: desiredAnnotationCapHeight
             )
             let digitAttributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): digitFont,
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String):
+                    config.digitRGB.cgColor
+            ]
+            let boldDigitAttributes: [NSAttributedString.Key: Any] = [
+                NSAttributedString.Key(kCTFontAttributeName as String): boldDigitFont,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
                     config.digitRGB.cgColor
             ]
@@ -273,6 +286,9 @@ struct StimulusTexture {
                 in: context
             )
 
+            let highlightedIndices = presentation == .highlighted
+                ? Self.solutionIndices(in: experiment.grid)
+                : []
             for index in experiment.grid.digits.indices {
                 let row = index / experiment.grid.columns
                 let column = index % experiment.grid.columns
@@ -288,7 +304,9 @@ struct StimulusTexture {
                 Self.drawText(
                     glyph,
                     centeredAt: center,
-                    attributes: digitAttributes,
+                    attributes: highlightedIndices.contains(index)
+                        ? boldDigitAttributes
+                        : digitAttributes,
                     in: context
                 )
             }
@@ -319,7 +337,12 @@ struct StimulusTexture {
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw StimulusTextureError.textureCreationFailed
         }
-        let presentationLabel = presentation == .masked ? "masked" : "revealed"
+        let presentationLabel: String
+        switch presentation {
+        case .masked: presentationLabel = "masked"
+        case .revealed: presentationLabel = "revealed"
+        case .highlighted: presentationLabel = "highlighted"
+        }
         texture.label = "Precomposed SmartFOV123 stimulus (\(display.mode.rawValue), \(presentationLabel))"
         pixels.withUnsafeBytes { bytes in
             texture.replace(
@@ -353,6 +376,35 @@ struct StimulusTexture {
             centeredAt: center,
             in: context
         )
+    }
+
+    private static func solutionIndices(in grid: NumberGrid) -> Set<Int> {
+        let placement = grid.targetPlacement
+        var cells = Set<Int>()
+        for offset in 0..<3 {
+            let row = placement.orientation == .horizontal
+                ? placement.row
+                : placement.row + offset
+            let column = placement.orientation == .horizontal
+                ? placement.column + offset
+                : placement.column
+            cells.insert(row * grid.columns + column)
+        }
+
+        let middleRow = placement.row
+            + (placement.orientation == .vertical ? 1 : 0)
+        let middleColumn = placement.column
+            + (placement.orientation == .horizontal ? 1 : 0)
+        for offset in -1...1 {
+            let row = placement.orientation == .horizontal
+                ? middleRow + offset
+                : middleRow
+            let column = placement.orientation == .horizontal
+                ? middleColumn
+                : middleColumn + offset
+            cells.insert(row * grid.columns + column)
+        }
+        return cells
     }
 
     private static func drawText(

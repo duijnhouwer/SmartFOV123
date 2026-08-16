@@ -191,7 +191,6 @@ final class AppModel {
 
     func beginTrialTransition() {
         trialPhase = .transitioning
-        stimulusPresentationState.hide()
     }
 
     func presentPreparedTrial() {
@@ -409,6 +408,7 @@ final class AppModel {
                 )
                 completedTargetCount += 1
                 statusMessage = "Correct — heard \(candidate)."
+                stimulusPresentationState.highlightSolution()
                 scheduleCompletedTrialAdvance()
             } catch {
                 statusMessage = "Correct response, but trial \(currentTrialIndex + 1) couldn't be saved: \(error.localizedDescription) Say the crossing sequence again to retry."
@@ -596,8 +596,6 @@ final class AppModel {
             && currentTrialIndex + 1 >= trialCount
         if !finishesExperiment {
             beginTrialTransition()
-            await Task.yield()
-            try? await Task.sleep(nanoseconds: 50_000_000)
         }
 
         advanceAfterCompletedTrial()

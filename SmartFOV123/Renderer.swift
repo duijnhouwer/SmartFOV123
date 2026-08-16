@@ -119,6 +119,7 @@ private struct TrialRenderResources: @unchecked Sendable {
     let geometry: StimulusGeometry
     let maskedTexture: StimulusTexture
     let revealedTexture: StimulusTexture
+    let highlightedTexture: StimulusTexture
     let timeBarTexture: TimeBarTexture?
     let taskMode: TaskMode
 }
@@ -204,11 +205,14 @@ actor Renderer {
     private let depthState: MTLDepthStencilState
     private var maskedStimulusTexture: StimulusTexture?
     private var revealedStimulusTexture: StimulusTexture?
+    private var highlightedStimulusTexture: StimulusTexture?
     private var timeBarTexture: TimeBarTexture?
     private var taskMode: TaskMode = .fixedNumberOfTrials
     private let presentationState: StimulusPresentationState
     private let trialResourceMailbox = TrialResourceMailbox()
-    private var loadedTrialRevision: Int?
+    private var activeTrialRevision: Int?
+    private var preparedTrialResources: TrialRenderResources?
+    private var failedTrialRevision: Int?
     private var participantPromptTexture: ParticipantPromptTexture?
     private var lastParticipantPrompt: StimulusPresentationState.Prompt?
     private var loggedProjectionEyes = Set<String>()
@@ -239,6 +243,7 @@ actor Renderer {
         self.commandQueue = commandQueue
         self.maskedStimulusTexture = nil
         self.revealedStimulusTexture = nil
+        self.highlightedStimulusTexture = nil
         self.timeBarTexture = nil
 
         guard let library = device.makeDefaultLibrary() else {
@@ -387,17 +392,11 @@ actor Renderer {
         if let completion = trialResourceMailbox.takeCompletion() {
             switch completion {
             case .success(let resources):
-                experiment = resources.experiment
-                geometry = resources.geometry
-                maskedStimulusTexture = resources.maskedTexture
-                revealedStimulusTexture = resources.revealedTexture
-                timeBarTexture = resources.timeBarTexture
-                taskMode = resources.taskMode
-                loadedTrialRevision = resources.revision
-                loggedProjectionEyes.removeAll()
+                preparedTrialResources = resources
+                failedTrialRevision = nil
                 presentationState.markTrialReady(revision: resources.revision)
             case .failure(let revision, let message):
-                loadedTrialRevision = revision
+                failedTrialRevision = revision
                 presentationState.markTrialReady(revision: revision)
                 Task { @MainActor in
                     appModel.showConfigurationError(message)
@@ -405,8 +404,26 @@ actor Renderer {
             }
         }
 
+        if let revision = presentationState.activeRevision,
+           revision != activeTrialRevision,
+           let resources = preparedTrialResources,
+           resources.revision == revision {
+            experiment = resources.experiment
+            geometry = resources.geometry
+            maskedStimulusTexture = resources.maskedTexture
+            revealedStimulusTexture = resources.revealedTexture
+            highlightedStimulusTexture = resources.highlightedTexture
+            timeBarTexture = resources.timeBarTexture
+            taskMode = resources.taskMode
+            activeTrialRevision = revision
+            preparedTrialResources = nil
+            loggedProjectionEyes.removeAll()
+        }
+
         guard let request = presentationState.trialRequest,
-              request.revision != loadedTrialRevision,
+              request.revision != activeTrialRevision,
+              request.revision != preparedTrialResources?.revision,
+              request.revision != failedTrialRevision,
               trialResourceMailbox.beginLoading(revision: request.revision) else {
             return
         }
@@ -441,6 +458,15 @@ actor Renderer {
                         score: request.score,
                         trialsRemaining: request.trialsRemaining,
                         presentation: .revealed
+                    ),
+                    highlightedTexture: StimulusTexture(
+                        device: device,
+                        commandQueue: textureCommandQueue,
+                        experiment: request.experiment,
+                        taskMode: request.taskMode,
+                        score: request.score,
+                        trialsRemaining: request.trialsRemaining,
+                        presentation: .highlighted
                     ),
                     timeBarTexture: request.taskMode.durationSeconds == nil
                         ? nil
@@ -564,6 +590,14 @@ actor Renderer {
         case .revealedGrid:
             surfaceTexture = revealedStimulusTexture?.texture
             rendersSurface = revealedStimulusTexture != nil && geometry != nil
+            rendersTimeBar = true
+            rendersBinocularly = false
+            surfaceCenter = geometry?.fovCenterMeters ?? .zero
+            surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
+            surfaceDistance = geometry?.distanceMeters ?? 1.5
+        case .highlightedGrid:
+            surfaceTexture = highlightedStimulusTexture?.texture
+            rendersSurface = highlightedStimulusTexture != nil && geometry != nil
             rendersTimeBar = true
             rendersBinocularly = false
             surfaceCenter = geometry?.fovCenterMeters ?? .zero

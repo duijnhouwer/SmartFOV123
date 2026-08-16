@@ -20,6 +20,7 @@ final class StimulusPresentationState: @unchecked Sendable {
         case participantPrompt(Prompt)
         case maskedGrid
         case revealedGrid
+        case highlightedGrid
     }
 
     private let lock = NSLock()
@@ -27,6 +28,7 @@ final class StimulusPresentationState: @unchecked Sendable {
     private var currentTrialRequest: TrialRequest?
     private var nextTrialRevision = 1
     private var readyTrialRevision: Int?
+    private var activeTrialRevision: Int?
     private var rendererRunning = false
     private var timeBarStartUptimeNanoseconds: UInt64?
     private var timeBarDurationNanoseconds: UInt64?
@@ -41,6 +43,10 @@ final class StimulusPresentationState: @unchecked Sendable {
 
     var isRendererRunning: Bool {
         lock.withLock { rendererRunning }
+    }
+
+    var activeRevision: Int? {
+        lock.withLock { activeTrialRevision }
     }
 
     var timeBarFillFraction: Float {
@@ -107,6 +113,9 @@ final class StimulusPresentationState: @unchecked Sendable {
 
     func reset() {
         lock.withLock {
+            guard let revision = readyTrialRevision,
+                  currentTrialRequest?.revision == revision else { return }
+            activeTrialRevision = revision
             currentContent = .maskedGrid
         }
     }
@@ -120,6 +129,12 @@ final class StimulusPresentationState: @unchecked Sendable {
     func revealGrid() {
         lock.withLock {
             currentContent = .revealedGrid
+        }
+    }
+
+    func highlightSolution() {
+        lock.withLock {
+            currentContent = .highlightedGrid
         }
     }
 

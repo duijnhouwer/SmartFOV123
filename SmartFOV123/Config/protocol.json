@@ -58,7 +58,7 @@
       "metronome": {
         "start_seconds": [0, 30, 60, 90, 120, 150, 180, 210, 240, 270],
         "beats_per_minute": [60, 66, 72, 80, 88, 98, 110, 124, 140, 160],
-        "volume": 0.3
+        "volume": 0.0
       },
       "final_gong": true
     },
