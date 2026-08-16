@@ -8,14 +8,16 @@ import Metal
 /// digit glyphs and uses Core Text with antialiasing and font smoothing.
 struct ParticipantPromptTexture {
     let texture: MTLTexture
+    let halfSizeMeters: SIMD2<Float>
 
     init(
         device: MTLDevice,
         commandQueue: MTLCommandQueue,
         prompt: StimulusPresentationState.Prompt
     ) throws {
-        let width = 1_400
-        let height = 1_000
+        let layout = Self.makeLayout(for: prompt)
+        let width = Int(layout.canvasSize.width)
+        let height = Int(layout.canvasSize.height)
         let bytesPerRow = width * 4
         var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
 
@@ -40,7 +42,7 @@ struct ParticipantPromptTexture {
             context.clear(CGRect(x: 0, y: 0, width: width, height: height))
 
             let panel = CGPath(
-                roundedRect: CGRect(x: 70, y: 70, width: 1_260, height: 860),
+                roundedRect: layout.panelRect,
                 cornerWidth: 64,
                 cornerHeight: 64,
                 transform: nil
@@ -55,29 +57,28 @@ struct ParticipantPromptTexture {
 
             Self.draw(
                 prompt.title,
-                in: CGRect(x: 150, y: 760, width: 1_100, height: 105),
+                in: layout.titleRect,
                 fontSize: 58,
                 weight: .bold,
                 alignment: .center,
                 in: context
             )
 
-            var messageTop: CGFloat = 700
-            if let emphasizedText = prompt.emphasizedText {
+            if let emphasizedText = prompt.emphasizedText,
+               let emphasizedRect = layout.emphasizedRect {
                 Self.draw(
                     emphasizedText,
-                    in: CGRect(x: 150, y: 625, width: 1_100, height: 105),
+                    in: emphasizedRect,
                     fontSize: 84,
                     weight: .semibold,
                     alignment: .center,
                     in: context
                 )
-                messageTop = 590
             }
 
             Self.draw(
                 prompt.message,
-                in: CGRect(x: 150, y: 145, width: 1_100, height: messageTop - 145),
+                in: layout.messageRect,
                 fontSize: 37,
                 weight: .regular,
                 alignment: prompt.usesLeadingAlignment ? .left : .center,
@@ -113,6 +114,11 @@ struct ParticipantPromptTexture {
         blitEncoder.endEncoding()
         commandBuffer.commit()
         self.texture = texture
+        let pixelsPerMeter: Float = 1_500
+        halfSizeMeters = SIMD2<Float>(
+            Float(width) / pixelsPerMeter / 2,
+            Float(height) / pixelsPerMeter / 2
+        )
     }
 
     private enum FontWeight {
@@ -129,14 +135,129 @@ struct ParticipantPromptTexture {
         }
     }
 
-    private static func draw(
+    private struct Layout {
+        let canvasSize: CGSize
+        let panelRect: CGRect
+        let titleRect: CGRect
+        let emphasizedRect: CGRect?
+        let messageRect: CGRect
+    }
+
+    private static func makeLayout(for prompt: StimulusPresentationState.Prompt) -> Layout {
+        let outerMargin: CGFloat = 50
+        let panelPadding: CGFloat = 80
+        let maxContentWidth: CGFloat = 1_100
+        let minContentWidth: CGFloat = 560
+        let titleFontSize: CGFloat = 58
+        let emphasizedFontSize: CGFloat = 84
+        let messageFontSize: CGFloat = 37
+        let sectionSpacing: CGFloat = 24
+
+        let titleSize = measure(
+            prompt.title,
+            maxWidth: maxContentWidth,
+            fontSize: titleFontSize,
+            weight: .bold,
+            alignment: .center
+        )
+        let emphasizedSize = prompt.emphasizedText.map {
+            measure(
+                $0,
+                maxWidth: maxContentWidth,
+                fontSize: emphasizedFontSize,
+                weight: .semibold,
+                alignment: .center
+            )
+        }
+        let preliminaryMessageSize = measure(
+            prompt.message,
+            maxWidth: maxContentWidth,
+            fontSize: messageFontSize,
+            weight: .regular,
+            alignment: prompt.usesLeadingAlignment ? .left : .center
+        )
+        let contentWidth = min(
+            maxContentWidth,
+            [minContentWidth, titleSize.width, emphasizedSize?.width ?? 0, preliminaryMessageSize.width].max()!
+        )
+        let messageSize = measure(
+            prompt.message,
+            maxWidth: contentWidth,
+            fontSize: messageFontSize,
+            weight: .regular,
+            alignment: prompt.usesLeadingAlignment ? .left : .center
+        )
+
+        let contentHeight = titleSize.height
+            + sectionSpacing
+            + (emphasizedSize.map { $0.height + sectionSpacing } ?? 0)
+            + messageSize.height
+        let panelSize = CGSize(
+            width: contentWidth + panelPadding * 2,
+            height: max(360, contentHeight + panelPadding * 2)
+        )
+        let panelRect = CGRect(origin: CGPoint(x: outerMargin, y: outerMargin), size: panelSize)
+        let contentX = panelRect.minX + panelPadding
+        var cursorY = panelRect.maxY - panelPadding - titleSize.height
+        let titleRect = CGRect(x: contentX, y: cursorY, width: contentWidth, height: titleSize.height)
+        cursorY -= sectionSpacing
+        var emphasizedRect: CGRect?
+        if let emphasizedSize {
+            cursorY -= emphasizedSize.height
+            emphasizedRect = CGRect(
+                x: contentX,
+                y: cursorY,
+                width: contentWidth,
+                height: emphasizedSize.height
+            )
+            cursorY -= sectionSpacing
+        }
+        cursorY -= messageSize.height
+        let messageRect = CGRect(
+            x: contentX,
+            y: cursorY,
+            width: contentWidth,
+            height: messageSize.height
+        )
+
+        return Layout(
+            canvasSize: CGSize(
+                width: ceil(panelSize.width + outerMargin * 2),
+                height: ceil(panelSize.height + outerMargin * 2)
+            ),
+            panelRect: panelRect,
+            titleRect: titleRect,
+            emphasizedRect: emphasizedRect,
+            messageRect: messageRect
+        )
+    }
+
+    private static func measure(
         _ text: String,
-        in rect: CGRect,
+        maxWidth: CGFloat,
         fontSize: CGFloat,
         weight: FontWeight,
-        alignment: CTTextAlignment,
-        in context: CGContext
-    ) {
+        alignment: CTTextAlignment
+    ) -> CGSize {
+        let attributed = NSAttributedString(
+            string: text,
+            attributes: attributes(fontSize: fontSize, weight: weight, alignment: alignment)
+        )
+        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+        return CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter,
+            CFRange(location: 0, length: attributed.length),
+            nil,
+            CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
+            nil
+        )
+    }
+
+    private static func attributes(
+        fontSize: CGFloat,
+        weight: FontWeight,
+        alignment: CTTextAlignment
+    ) -> [NSAttributedString.Key: Any] {
         var textAlignment = alignment
         var lineSpacing: CGFloat = 10
         let paragraphStyle = withUnsafePointer(to: &textAlignment) { alignmentPointer in
@@ -156,14 +277,27 @@ struct ParticipantPromptTexture {
                 return CTParagraphStyleCreate(settings, settings.count)
             }
         }
-        let attributes: [NSAttributedString.Key: Any] = [
+        return [
             NSAttributedString.Key(kCTFontAttributeName as String):
                 CTFontCreateWithName(weight.name, fontSize, nil),
             NSAttributedString.Key(kCTForegroundColorAttributeName as String):
                 CGColor(red: 1, green: 1, blue: 1, alpha: 1),
             NSAttributedString.Key(kCTParagraphStyleAttributeName as String): paragraphStyle
         ]
-        let attributed = NSAttributedString(string: text, attributes: attributes)
+    }
+
+    private static func draw(
+        _ text: String,
+        in rect: CGRect,
+        fontSize: CGFloat,
+        weight: FontWeight,
+        alignment: CTTextAlignment,
+        in context: CGContext
+    ) {
+        let attributed = NSAttributedString(
+            string: text,
+            attributes: attributes(fontSize: fontSize, weight: weight, alignment: alignment)
+        )
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
         let path = CGPath(rect: rect, transform: nil)
         let frame = CTFramesetterCreateFrame(

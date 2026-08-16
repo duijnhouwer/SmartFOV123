@@ -504,7 +504,7 @@ actor Renderer {
             rendersSurface = participantPromptTexture != nil
             rendersBinocularly = true
             surfaceCenter = .zero
-            surfaceHalfSize = SIMD2<Float>(0.465, 0.332)
+            surfaceHalfSize = participantPromptTexture?.halfSizeMeters ?? SIMD2<Float>(0.465, 0.332)
             surfaceDistance = 1.5
         case .maskedGrid:
             surfaceTexture = maskedStimulusTexture?.texture

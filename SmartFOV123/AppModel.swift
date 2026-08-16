@@ -119,9 +119,9 @@ final class AppModel {
         case .participantConfirmation:
             guard let pendingSubjectNumber else { return nil }
             return .init(
-                title: "The number you said was:",
-                message: "Is that correct?\nSpeak: “Yes” or “No”",
-                emphasizedText: pendingSubjectNumber
+                title: pendingSubjectNumber,
+                message: "Did I hear that correctly?\n\nSay “Yes” or “No”.",
+                emphasizedText: nil
             )
         case .instructions:
             guard let plan else { return nil }
