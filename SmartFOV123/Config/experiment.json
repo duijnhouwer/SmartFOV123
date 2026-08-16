@@ -16,7 +16,7 @@
       "digits": {
         "height_degrees": 0.7,
         "font_name": "Arial",
-        "rgb": [1, 0, 0],
+        "rgb": [0, 0, 0],
         "random_method": "flat_distribution"
       },
       "fov": {

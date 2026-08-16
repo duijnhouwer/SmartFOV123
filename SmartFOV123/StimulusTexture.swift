@@ -310,26 +310,48 @@ struct StimulusTexture {
         to pixels: inout [UInt8]
     ) {
         let peakOpacity = display.peakOpacity
+        let linearBySRGBByte = (0...255).map {
+            sRGBToLinear(Float($0) / 255)
+        }
+        let premultipliedSRGBByByte = linearBySRGBByte.map {
+            byte(linearToSRGB($0 * peakOpacity))
+        }
+        let opticalAlphaByByte = linearBySRGBByte.map {
+            byte($0 * peakOpacity)
+        }
+        let videoPassthroughAlpha = byte(peakOpacity)
+
         for index in stride(from: 0, to: pixels.count, by: 4) {
-            let red = Float(pixels[index]) / 255
-            let green = Float(pixels[index + 1]) / 255
-            let blue = Float(pixels[index + 2]) / 255
-            let alpha: Float
+            let red = Int(pixels[index])
+            let green = Int(pixels[index + 1])
+            let blue = Int(pixels[index + 2])
+
+            // Core Graphics supplies sRGB-encoded bytes, while Metal decodes
+            // RGB from an sRGB texture to linear light during sampling. Apply
+            // display scaling and premultiplication in linear light, then
+            // encode RGB back to sRGB storage. Alpha is always stored linearly.
+            pixels[index] = premultipliedSRGBByByte[red]
+            pixels[index + 1] = premultipliedSRGBByByte[green]
+            pixels[index + 2] = premultipliedSRGBByByte[blue]
             switch display.mode {
             case .videoPassthrough:
-                alpha = peakOpacity
+                pixels[index + 3] = videoPassthroughAlpha
             case .opticalSeeThroughSimulation:
-                alpha = max(red, green, blue) * peakOpacity
+                pixels[index + 3] = opticalAlphaByByte[max(red, green, blue)]
             }
-
-            // Compositor Services requires premultiplied-alpha color. For the
-            // optical simulation, RGB*peakOpacity is equivalent to normalizing
-            // hue by intensity and then premultiplying by intensity*opacity.
-            pixels[index] = byte(red * peakOpacity)
-            pixels[index + 1] = byte(green * peakOpacity)
-            pixels[index + 2] = byte(blue * peakOpacity)
-            pixels[index + 3] = byte(alpha)
         }
+    }
+
+    private static func sRGBToLinear(_ value: Float) -> Float {
+        value <= 0.04045
+            ? value / 12.92
+            : pow((value + 0.055) / 1.055, 2.4)
+    }
+
+    private static func linearToSRGB(_ value: Float) -> Float {
+        value <= 0.0031308
+            ? value * 12.92
+            : 1.055 * pow(value, 1 / 2.4) - 0.055
     }
 
     private static func byte(_ value: Float) -> UInt8 {
