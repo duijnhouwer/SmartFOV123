@@ -445,10 +445,10 @@ final class AppModel {
             switch plan.taskMode {
             case .fixedNumberOfTrials:
                 let trial = plan.trials[currentTrialIndex]
-                statusMessage = "Preparing trial \(trial.trialNumber) of \(trialCount) (\(trial.conditionName))."
+                statusMessage = "Preparing trial \(trial.trialNumber) of \(trialCount) (condition \(trial.conditionNumber))."
             case .loopTrials:
                 let trial = plan.trials[currentTrialIndex % plan.trials.count]
-                statusMessage = "Preparing target \(currentTrialIndex + 1) (score \(completedTargetCount), \(trial.conditionName))."
+                statusMessage = "Preparing target \(currentTrialIndex + 1) (score \(completedTargetCount), condition \(trial.conditionNumber))."
             }
         }
     }

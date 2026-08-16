@@ -214,7 +214,7 @@ struct NumberGrid: Sendable {
 
 struct Experiment: Sendable {
     let trialNumber: Int
-    let conditionName: String
+    let conditionNumber: Int
     let blockNumber: Int
     let randomSeed: UInt64
     let configuration: ExperimentConfiguration
@@ -223,7 +223,7 @@ struct Experiment: Sendable {
 
 struct ScheduledTrial: Sendable {
     let trialNumber: Int
-    let conditionName: String
+    let conditionNumber: Int
     let blockNumber: Int
     let configuration: ExperimentConfiguration
 
@@ -231,7 +231,7 @@ struct ScheduledTrial: Sendable {
         let seed = configuration.stimulus.randomSeed
         return Experiment(
             trialNumber: trialNumber ?? self.trialNumber,
-            conditionName: conditionName,
+            conditionNumber: conditionNumber,
             blockNumber: blockNumber,
             randomSeed: seed,
             configuration: configuration,
@@ -256,7 +256,7 @@ struct ExperimentPlan: Sendable {
     let trials: [ScheduledTrial]
 
     static func loadBundled() throws -> ExperimentPlan {
-        guard let url = Bundle.main.url(forResource: "experiment", withExtension: "json") else {
+        guard let url = Bundle.main.url(forResource: "protocol", withExtension: "json") else {
             throw ExperimentError.missingConfiguration
         }
         return try load(from: url)
@@ -319,11 +319,11 @@ enum ExperimentError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingConfiguration:
-            return "The bundled experiment.json file is missing."
+            return "The bundled protocol.json file is missing."
         case .unreadableConfiguration(let error):
-            return "experiment.json couldn't be read: \(error.localizedDescription)"
+            return "protocol.json couldn't be read: \(error.localizedDescription)"
         case .invalidConfiguration(let message):
-            return "experiment.json is invalid: \(message)"
+            return "protocol.json is invalid: \(message)"
         }
     }
 }
@@ -337,6 +337,7 @@ private struct ExperimentFile: Decodable {
     let debriefing: String
     let taskMode: TaskMode
     let foveatedRendering: Bool?
+    let masterConditionTemplate: ConditionDefinition
     let conditions: [ConditionDefinition]
 
     private enum CodingKeys: String, CodingKey {
@@ -348,14 +349,9 @@ private struct ExperimentFile: Decodable {
         case debriefing
         case taskMode = "task_mode"
         case foveatedRendering = "foveated_rendering"
+        case masterConditionTemplate = "master_condition_template"
         case conditions
     }
-}
-
-private enum InheritedField<Value> {
-    case inherited
-    case null
-    case value(Value)
 }
 
 private enum RandomSeedSpecification: Equatable {
@@ -519,11 +515,9 @@ private struct SpeechPatch: Decodable {
 }
 
 private struct ConditionDefinition: Decodable {
-    let name: String
-    let inherits: InheritedField<String>
-    let blockNumber: InheritedField<Int>
-    let repeats: InheritedField<Int>
-    let randomSeed: InheritedField<RandomSeedSpecification>
+    let blockNumber: Int?
+    let repeats: Int?
+    let randomSeed: RandomSeedSpecification?
     let digits: DigitPatch?
     let annotation: AnnotationPatch?
     let timer: TimerPatch?
@@ -533,41 +527,12 @@ private struct ConditionDefinition: Decodable {
     let speech: SpeechPatch?
 
     private enum CodingKeys: String, CodingKey {
-        case name, inherits, repeats
+        case repeats
         case randomSeed = "random_seed"
         case blockNumber = "block_nr"
         case digits, annotation, timer, tiles, surround, fov, speech
     }
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        name = try container.decode(String.self, forKey: .name)
-        inherits = try Self.decodeField(String.self, key: .inherits, from: container)
-        blockNumber = try Self.decodeField(Int.self, key: .blockNumber, from: container)
-        repeats = try Self.decodeField(Int.self, key: .repeats, from: container)
-        randomSeed = try Self.decodeField(
-            RandomSeedSpecification.self,
-            key: .randomSeed,
-            from: container
-        )
-        digits = try container.decodeIfPresent(DigitPatch.self, forKey: .digits)
-        annotation = try container.decodeIfPresent(AnnotationPatch.self, forKey: .annotation)
-        timer = try container.decodeIfPresent(TimerPatch.self, forKey: .timer)
-        tiles = try container.decodeIfPresent(TilePatch.self, forKey: .tiles)
-        surround = try container.decodeIfPresent(SurroundPatch.self, forKey: .surround)
-        fov = try container.decodeIfPresent(FOVPatch.self, forKey: .fov)
-        speech = try container.decodeIfPresent(SpeechPatch.self, forKey: .speech)
-    }
-
-    private static func decodeField<T: Decodable>(
-        _ type: T.Type,
-        key: CodingKeys,
-        from container: KeyedDecodingContainer<CodingKeys>
-    ) throws -> InheritedField<T> {
-        guard container.contains(key) else { return .inherited }
-        guard try !container.decodeNil(forKey: key) else { return .null }
-        return .value(try container.decode(type, forKey: key))
-    }
 }
 
 private struct ResolvedConditionPatch {
@@ -582,12 +547,12 @@ private struct ResolvedConditionPatch {
     var surround = ResolvedSurround()
     var fov = ResolvedFOV()
     var aliases: [String: [String]] = [:]
-    var speechResetSeconds: Float = 2
+    var speechResetSeconds: Float?
 
     mutating func apply(_ definition: ConditionDefinition) {
-        blockNumber = definition.blockNumber.applying(to: blockNumber)
-        repeats = definition.repeats.applying(to: repeats)
-        randomSeed = definition.randomSeed.applying(to: randomSeed)
+        blockNumber = definition.blockNumber ?? blockNumber
+        repeats = definition.repeats ?? repeats
+        randomSeed = definition.randomSeed ?? randomSeed
 
         if let patch = definition.digits {
             digits.heightDegrees = patch.heightDegrees ?? digits.heightDegrees
@@ -708,35 +673,24 @@ private struct ResolvedFOV {
     var distanceMeters: Float?
 }
 
-private extension InheritedField {
-    func applying(to inheritedValue: Value?) -> Value? {
-        switch self {
-        case .inherited: inheritedValue
-        case .null: nil
-        case .value(let value): value
-        }
-    }
-}
-
 private struct ExpandedCondition {
-    let name: String
+    let number: Int
     let blockNumber: Int
     let seed: UInt64
     let patch: ResolvedConditionPatch
 }
 
 private enum ConditionResolver {
-    static let generatedName = "__condition_nr__"
     static let maximumTrialCount = 10_000
 
     static func makePlan(from file: ExperimentFile) throws -> ExperimentPlan {
-        guard file.schemaVersion == 5 else {
+        guard file.schemaVersion == 6 else {
             throw ExperimentError.invalidConfiguration(
-                "schema_version \(file.schemaVersion) is unsupported; this app requires version 5."
+                "schema_version \(file.schemaVersion) is unsupported; this app requires version 6."
             )
         }
         guard !file.conditions.isEmpty else {
-            throw ExperimentError.invalidConfiguration("conditions must contain at least the master condition.")
+            throw ExperimentError.invalidConfiguration("conditions must contain at least one condition.")
         }
         let protocolName = file.protocolName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !protocolName.isEmpty, protocolName == file.protocolName else {
@@ -768,54 +722,56 @@ private enum ConditionResolver {
             )
         }
 
-        try validateDefinitionNames(file.conditions)
-        try validateMaster(file.conditions[0])
+        guard file.masterConditionTemplate.blockNumber == nil else {
+            throw ExperimentError.invalidConfiguration(
+                "master_condition_template must not define block_nr."
+            )
+        }
+        guard file.masterConditionTemplate.repeats == nil else {
+            throw ExperimentError.invalidConfiguration(
+                "master_condition_template must not define repeats."
+            )
+        }
+        var master = ResolvedConditionPatch()
+        master.apply(file.masterConditionTemplate)
+        try validateResolved(master, definitionName: "master_condition_template")
+        guard master.randomSeed != nil else {
+            throw ExperimentError.invalidConfiguration(
+                "master_condition_template must define random_seed."
+            )
+        }
 
-        let namedDefinitions = Dictionary(
-            uniqueKeysWithValues: file.conditions
-                .filter { $0.name != generatedName }
-                .map { ($0.name, $0) }
-        )
-        var cache: [String: ResolvedConditionPatch] = [:]
         var expanded: [ExpandedCondition] = []
 
-        for definition in file.conditions {
-            let patch = try resolve(
-                definition,
-                namedDefinitions: namedDefinitions,
-                cache: &cache,
-                path: []
-            )
-            try validateResolved(patch, definitionName: definition.name)
-
-            let repeats = patch.repeats!
-            guard repeats >= 0 else {
-                throw invalid(definition.name, "repeats must be zero or greater.")
+        for (index, definition) in file.conditions.enumerated() {
+            let conditionNumber = index + 1
+            let definitionName = "condition \(conditionNumber)"
+            guard let repeats = definition.repeats else {
+                throw invalid(definitionName, "must explicitly define repeats.")
+            }
+            guard let blockNumber = definition.blockNumber else {
+                throw invalid(definitionName, "must explicitly define block_nr.")
+            }
+            guard repeats > 0 else {
+                throw invalid(definitionName, "repeats must be greater than zero.")
             }
             guard repeats <= maximumTrialCount else {
-                throw invalid(definition.name, "repeats may not exceed \(maximumTrialCount).")
+                throw invalid(definitionName, "repeats may not exceed \(maximumTrialCount).")
             }
-            if definition.name == generatedName, repeats == 0 {
-                throw invalid(definition.name, "is a generated condition definition and therefore requires repeats greater than zero.")
+            guard blockNumber > 0 else {
+                throw invalid(definitionName, "block_nr must be at least 1.")
             }
-            guard repeats > 0 else { continue }
-            guard let blockNumber = patch.blockNumber, blockNumber > 0 else {
-                throw invalid(definition.name, "a condition with repeats greater than zero requires block_nr >= 1.")
-            }
+            var patch = master
+            patch.apply(definition)
+            try validateResolved(patch, definitionName: definitionName)
             guard let seedSpecification = patch.randomSeed else {
-                throw invalid(definition.name, "a condition with repeats greater than zero requires random_seed.")
-            }
-            if definition.name != generatedName, repeats > 1 {
-                throw invalid(
-                    definition.name,
-                    "a literal condition name may only be instantiated once; use \(generatedName) when repeats is greater than one."
-                )
+                throw invalid(definitionName, "does not resolve random_seed; define it in master_condition_template or this condition.")
             }
 
             let seeds = try expandSeeds(
                 seedSpecification,
                 repeats: repeats,
-                definitionName: definition.name
+                definitionName: definitionName
             )
             for seed in seeds {
                 guard expanded.count < maximumTrialCount else {
@@ -823,12 +779,9 @@ private enum ConditionResolver {
                         "The expanded experiment may contain at most \(maximumTrialCount) trials."
                     )
                 }
-                let conditionName = definition.name == generatedName
-                    ? "condition\(expanded.count + 1)"
-                    : definition.name
                 expanded.append(
                     .init(
-                        name: conditionName,
+                        number: conditionNumber,
                         blockNumber: blockNumber,
                         seed: seed,
                         patch: patch
@@ -842,19 +795,13 @@ private enum ConditionResolver {
                 "At least one condition must have repeats greater than zero."
             )
         }
-        guard Set(expanded.map(\.name)).count == expanded.count else {
-            throw ExperimentError.invalidConfiguration(
-                "Expanded condition names must be unique."
-            )
-        }
-
         try validateBlocks(expanded.map(\.blockNumber))
         let ordered = randomizedWithinBlocks(expanded)
         let trials = try ordered.enumerated().map { offset, condition in
             let configuration = try makeConfiguration(from: condition)
             return ScheduledTrial(
                 trialNumber: offset + 1,
-                conditionName: condition.name,
+                conditionNumber: condition.number,
                 blockNumber: condition.blockNumber,
                 configuration: configuration
             )
@@ -885,97 +832,13 @@ private enum ConditionResolver {
         )
     }
 
-    private static func validateDefinitionNames(_ definitions: [ConditionDefinition]) throws {
-        var literalNames = Set<String>()
-        for (index, definition) in definitions.enumerated() {
-            let name = definition.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, name == definition.name else {
-                throw ExperimentError.invalidConfiguration(
-                    "conditions[\(index)].name must be nonempty and have no leading or trailing whitespace."
-                )
-            }
-            if name.hasPrefix("__"), name != generatedName {
-                throw ExperimentError.invalidConfiguration(
-                    "conditions[\(index)].name ‘\(name)’ is reserved; the only supported reserved name is \(generatedName)."
-                )
-            }
-            guard name == generatedName || literalNames.insert(name).inserted else {
-                throw ExperimentError.invalidConfiguration("Condition name ‘\(name)’ is defined more than once.")
-            }
-            guard definition.inherits.isSpecified else {
-                throw invalid(name, "inherits must be explicitly present.")
-            }
-        }
-    }
-
-    private static func validateMaster(_ master: ConditionDefinition) throws {
-        guard master.name == "master" else {
-            throw ExperimentError.invalidConfiguration("The first condition must be named ‘master’.")
-        }
-        guard master.inherits.isNull else {
-            throw invalid("master", "inherits must be null.")
-        }
-        guard master.blockNumber.isNull else {
-            throw invalid("master", "block_nr must be explicitly null.")
-        }
-        guard case .value(0) = master.repeats else {
-            throw invalid("master", "repeats must be explicitly set to 0.")
-        }
-        guard master.randomSeed.isNull else {
-            throw invalid("master", "random_seed must be explicitly null.")
-        }
-    }
-
-    private static func resolve(
-        _ definition: ConditionDefinition,
-        namedDefinitions: [String: ConditionDefinition],
-        cache: inout [String: ResolvedConditionPatch],
-        path: [String]
-    ) throws -> ResolvedConditionPatch {
-        if definition.name != generatedName, let cached = cache[definition.name] {
-            return cached
-        }
-        guard !path.contains(definition.name) else {
-            throw invalid(definition.name, "inheritance cycle: \((path + [definition.name]).joined(separator: " → ")).")
-        }
-
-        var result = ResolvedConditionPatch()
-        switch definition.inherits {
-        case .inherited:
-            throw invalid(definition.name, "inherits must be explicitly present.")
-        case .null:
-            guard definition.name == "master" else {
-                throw invalid(definition.name, "only master may inherit null.")
-            }
-        case .value(let parentName):
-            guard parentName != generatedName else {
-                throw invalid(definition.name, "cannot inherit from the generated name \(generatedName).")
-            }
-            guard let parent = namedDefinitions[parentName] else {
-                throw invalid(definition.name, "inherits unknown condition ‘\(parentName)’.")
-            }
-            result = try resolve(
-                parent,
-                namedDefinitions: namedDefinitions,
-                cache: &cache,
-                path: path + [definition.name]
-            )
-        }
-        result.apply(definition)
-        if definition.name != generatedName {
-            cache[definition.name] = result
-        }
-        return result
-    }
-
     private static func validateResolved(
         _ patch: ResolvedConditionPatch,
         definitionName: String
     ) throws {
         func missing(_ name: String) throws -> Never {
-            throw invalid(definitionName, "does not resolve parameter \(name); master must define every parameter.")
+            throw invalid(definitionName, "does not resolve parameter \(name); master_condition_template must define every stimulus parameter.")
         }
-        guard patch.repeats != nil else { try missing("repeats") }
         guard let digitHeight = patch.digits.heightDegrees else { try missing("digits.height_degrees") }
         guard let fontName = patch.digits.fontName else { try missing("digits.font_name") }
         guard patch.digits.rgb != nil else { try missing("digits.rgb") }
@@ -1011,7 +874,9 @@ private enum ConditionResolver {
         guard let tileHeight = patch.tiles.heightDegrees else { try missing("tiles.height_degrees") }
         guard let tileGutter = patch.tiles.gutterDegrees else { try missing("tiles.gutter_degrees") }
         guard let tileCornerRadius = patch.tiles.cornerRadiusDegrees else { try missing("tiles.corner_radius_degrees") }
-        let timeBarBackCornerRadius = patch.timeBar.backCornerRadiusDegrees ?? tileCornerRadius
+        guard let timeBarBackCornerRadius = patch.timeBar.backCornerRadiusDegrees else {
+            try missing("timer.bar.back_corner_radius")
+        }
         guard patch.tiles.fillRGB != nil else { try missing("tiles.fill_rgb") }
         guard patch.tiles.gutterRGB != nil else { try missing("tiles.gutter_rgb") }
         guard let columns = patch.tiles.numberHorizontal else { try missing("tiles.number_horizontal") }
@@ -1181,7 +1046,10 @@ private enum ConditionResolver {
         guard !annotationFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw invalid(definitionName, "annotation.font_name must not be empty.")
         }
-        guard patch.speechResetSeconds.isFinite, patch.speechResetSeconds > 0 else {
+        guard let speechResetSeconds = patch.speechResetSeconds else {
+            try missing("speech.reset_seconds")
+        }
+        guard speechResetSeconds.isFinite, speechResetSeconds > 0 else {
             throw invalid(definitionName, "speech.reset_seconds must be finite and greater than zero.")
         }
     }
@@ -1242,7 +1110,7 @@ private enum ConditionResolver {
             ),
             speech: .init(
                 digitAliases: patch.aliases,
-                resetSeconds: patch.speechResetSeconds
+                resetSeconds: patch.speechResetSeconds!
             ),
             stimulus: .init(
                 eye: patch.fov.eye!,
@@ -1258,8 +1126,7 @@ private enum ConditionResolver {
                 timeBarHeightArcmin: patch.timeBar.heightDegrees! * 60,
                 timeBarBackRGB: patch.timeBar.backRGB!,
                 timeBarBackHeightArcmin: patch.timeBar.backHeightDegrees! * 60,
-                timeBarBackCornerRadiusArcmin: (patch.timeBar.backCornerRadiusDegrees
-                    ?? patch.tiles.cornerRadiusDegrees!) * 60,
+                timeBarBackCornerRadiusArcmin: patch.timeBar.backCornerRadiusDegrees! * 60,
                 metronomeStartSeconds: patch.metronome.startSeconds!,
                 metronomeBeatsPerMinute: patch.metronome.beatsPerMinute!,
                 metronomeVolume: patch.metronome.volume!,
@@ -1291,18 +1158,6 @@ private enum ConditionResolver {
     }
 }
 
-private extension InheritedField {
-    var isSpecified: Bool {
-        if case .inherited = self { return false }
-        return true
-    }
-
-    var isNull: Bool {
-        if case .null = self { return true }
-        return false
-    }
-}
-
 private enum JSONShapeValidator {
     static func validate(_ data: Data) throws {
         let object: Any
@@ -1316,21 +1171,37 @@ private enum JSONShapeValidator {
             root,
             allowed: [
                 "schema_version", "protocol_name", "subject_number_digit_count",
-                "instructions", "debriefing_title", "debriefing", "foveated_rendering", "task_mode", "conditions"
+                "instructions", "debriefing_title", "debriefing", "foveated_rendering", "task_mode",
+                "master_condition_template", "conditions"
             ],
             path: "$"
         )
+        guard let rawMaster = root["master_condition_template"] else {
+            throw invalid("$.master_condition_template", "is required.")
+        }
+        try definition(rawMaster, path: "$.master_condition_template", schedulingFields: false)
         guard let rawConditions = root["conditions"] as? [Any] else {
             throw invalid("$.conditions", "must be an array.")
         }
         for (index, rawCondition) in rawConditions.enumerated() {
             let path = "$.conditions[\(index)]"
-            let condition = try dictionary(rawCondition, path: path)
-            try keys(
-                condition,
-                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "annotation", "timer", "tiles", "surround", "fov", "speech"],
-                path: path
-            )
+            try definition(rawCondition, path: path, schedulingFields: true)
+        }
+    }
+
+    private static func definition(
+        _ rawDefinition: Any,
+        path: String,
+        schedulingFields: Bool
+    ) throws {
+            let condition = try dictionary(rawDefinition, path: path)
+            var allowed: Set<String> = [
+                "random_seed", "digits", "annotation", "timer", "tiles", "surround", "fov", "speech"
+            ]
+            if schedulingFields {
+                allowed.formUnion(["block_nr", "repeats"])
+            }
+            try keys(condition, allowed: allowed, path: path)
             try section(
                 condition["digits"],
                 path: "\(path).digits",
@@ -1378,7 +1249,6 @@ private enum JSONShapeValidator {
                     try keys(aliases, allowed: Set((0...9).map(String.init)), path: "\(path).speech.aliases")
                 }
             }
-        }
     }
 
     private static func section(

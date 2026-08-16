@@ -44,10 +44,10 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 
 ### Configuration and provenance
 
-- Keep the initial experiment definition in one bundled `experiment.json` file.
+- Keep the initial experiment definition in one bundled `protocol.json` file.
 - Bundle referenced panoramas and synthetic-environment assets in the Xcode project.
 - Rebuilding and reinstalling the development app is an acceptable way to deploy configuration and asset changes.
-- Treat `experiment.json` as the authoritative description of stimulus geometry, environment, and trials.
+- Treat `protocol.json` as the authoritative description of stimulus geometry, environment, and trials.
 - Save the exact experiment configuration and Git commit identifier with every result set.
 - Do not rely on the current repository state alone to reconstruct a completed session.
 
@@ -77,9 +77,9 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 
 ## Phase 2 — Configurable stimuli
 
-- [ ] Add a bundled `experiment.json` resource to the Xcode project.
+- [ ] Add a bundled `protocol.json` resource to the Xcode project.
 - [ ] Define a small, versioned JSON schema for the initial experiment format.
-- [ ] Replace hardcoded stimulus parameters with a validated configuration model loaded from `experiment.json`.
+- [ ] Replace hardcoded stimulus parameters with a validated configuration model loaded from `protocol.json`.
 - [ ] Display a human-readable configuration summary before starting a session.
 - [ ] Reject invalid or unsupported configurations with actionable errors rather than silently substituting defaults.
 - [ ] Decode and validate the complete experiment, including every trial, when the app launches; do not defer trial-specific decoding or validation until a session is underway.
@@ -99,7 +99,7 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Add preview and configuration validation before entering immersion.
 - [ ] Save and load named stimulus protocols.
 
-### Initial `experiment.json` scope
+### Initial `protocol.json` scope
 
 - Stimulus width and height in degrees of visual angle.
 - Horizontal and vertical position in degrees relative to straight ahead.
@@ -163,7 +163,7 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 - [ ] Record participant responses and response latency.
 - [ ] Write one uniquely named session directory per run in the app's Documents container.
 - [ ] Save structured trial results as `results.json`.
-- [ ] Copy the exact loaded `experiment.json` into the session directory.
+- [ ] Copy the exact loaded `protocol.json` into the session directory.
 - [ ] Save `metadata.json` with the Git commit, app version, build number, device model, visionOS version, UTC timestamps, environment identifier, and session status.
 - [ ] Export structured session data with app, protocol, device, and environment versions.
 - [ ] Define handling for interrupted, incomplete, or invalid trials.
@@ -173,7 +173,7 @@ The present implementation is a diagnostic prototype, not yet an experimental or
 ```text
 session-20260813T132500Z-P017/
 ├── results.json
-├── experiment.json
+├── protocol.json
 └── metadata.json
 ```
 
@@ -246,7 +246,7 @@ Scripts should consume `devicectl`'s JSON output rather than parsing its human-r
 1. Confirm anatomical eye assignment beyond subjective color observation.
 2. Make repeated start/stop operation boringly reliable.
 3. Measure timing on hardware.
-4. Define the first bundled `experiment.json` schema.
+4. Define the first bundled `protocol.json` schema.
 5. Define session output and implement `results.json`, saved configuration, and provenance metadata.
 6. Prototype a neutral app-owned surround before selecting photographic assets.
 

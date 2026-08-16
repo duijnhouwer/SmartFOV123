@@ -279,7 +279,7 @@ private struct CompletedTrial: Encodable {
     }
 
     struct Definition: Encodable {
-        let conditionName: String
+        let conditionNumber: Int
         let blockNumber: Int
         let randomSeed: UInt64
         let digits: Digits
@@ -293,7 +293,7 @@ private struct CompletedTrial: Encodable {
         init(experiment: Experiment) {
             let configuration = experiment.configuration
             let stimulus = configuration.stimulus
-            conditionName = experiment.conditionName
+            conditionNumber = experiment.conditionNumber
             blockNumber = experiment.blockNumber
             randomSeed = experiment.randomSeed
             digits = .init(
@@ -357,7 +357,7 @@ private struct CompletedTrial: Encodable {
 
         private enum CodingKeys: String, CodingKey {
             case digits, annotation, timer, tiles, surround, fov, speech
-            case conditionName = "condition_name"
+            case conditionNumber = "condition_nr"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
         }
@@ -603,9 +603,9 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["score", "duration_seconds", "end_time_ms"]
         } else if dictionary.keys.contains("seeded_stimulus") {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
-        } else if dictionary.keys.contains("condition_name") {
+        } else if dictionary.keys.contains("condition_nr") {
             preferredOrder = [
-                "condition_name", "block_nr", "random_seed", "digits", "annotation", "timer",
+                "condition_nr", "block_nr", "random_seed", "digits", "annotation", "timer",
                 "tiles", "surround", "fov", "speech"
             ]
         } else if dictionary.keys.contains("metronome") {
