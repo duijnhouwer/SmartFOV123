@@ -235,7 +235,7 @@ private struct CompletedTrial: Encodable {
         let blockNumber: Int
         let randomSeed: UInt64
         let digits: Digits
-        let boxes: Boxes
+        let tiles: Tiles
         let fov: FOV
         let speech: Speech
 
@@ -251,14 +251,17 @@ private struct CompletedTrial: Encodable {
                 rgb: stimulus.digitRGB.array,
                 randomMethod: stimulus.digitRandomMethod.rawValue
             )
-            boxes = .init(
-                widthDegrees: stimulus.digitBoxWidthArcmin / 60,
-                heightDegrees: stimulus.digitBoxHeightArcmin / 60,
-                strokeDegrees: stimulus.digitBoxStrokeArcmin / 60,
-                fillRGB: stimulus.digitBoxFillRGB.array,
-                strokeRGB: stimulus.digitBoxStrokeRGB.array,
-                numberHorizontal: stimulus.numberOfDigitBoxesHorizontal,
-                numberVertical: stimulus.numberOfDigitBoxesVertical
+            tiles = .init(
+                widthDegrees: stimulus.tileWidthArcmin / 60,
+                heightDegrees: stimulus.tileHeightArcmin / 60,
+                gutterDegrees: stimulus.tileGutterArcmin / 60,
+                outerGutterDegrees: stimulus.tileOuterGutterArcmin / 60,
+                cornerRadiusDegrees: stimulus.tileCornerRadiusArcmin / 60,
+                outerGutterCornerRadiusDegrees: stimulus.tileOuterGutterCornerRadiusArcmin / 60,
+                fillRGB: stimulus.tileFillRGB.array,
+                gutterRGB: stimulus.tileGutterRGB.array,
+                numberHorizontal: stimulus.numberOfTilesHorizontal,
+                numberVertical: stimulus.numberOfTilesVertical
             )
             fov = .init(
                 eye: stimulus.eye.rawValue,
@@ -277,7 +280,7 @@ private struct CompletedTrial: Encodable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case digits, boxes, fov, speech
+            case digits, tiles, fov, speech
             case conditionName = "condition_name"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
@@ -298,21 +301,27 @@ private struct CompletedTrial: Encodable {
         }
     }
 
-    struct Boxes: Encodable {
+    struct Tiles: Encodable {
         let widthDegrees: Float
         let heightDegrees: Float
-        let strokeDegrees: Float
+        let gutterDegrees: Float
+        let outerGutterDegrees: Float
+        let cornerRadiusDegrees: Float
+        let outerGutterCornerRadiusDegrees: Float
         let fillRGB: [Float]
-        let strokeRGB: [Float]
+        let gutterRGB: [Float]
         let numberHorizontal: Int
         let numberVertical: Int
 
         private enum CodingKeys: String, CodingKey {
             case widthDegrees = "width_degrees"
             case heightDegrees = "height_degrees"
-            case strokeDegrees = "stroke_degrees"
+            case gutterDegrees = "gutter_degrees"
+            case outerGutterDegrees = "outer_gutter_degrees"
+            case cornerRadiusDegrees = "corner_radius_degrees"
+            case outerGutterCornerRadiusDegrees = "outer_gutter_corner_radius_degrees"
             case fillRGB = "fill_rgb"
-            case strokeRGB = "stroke_rgb"
+            case gutterRGB = "gutter_rgb"
             case numberHorizontal = "number_horizontal"
             case numberVertical = "number_vertical"
         }
@@ -454,7 +463,7 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_name") {
             preferredOrder = [
-                "condition_name", "block_nr", "random_seed", "digits", "boxes", "fov", "speech"
+                "condition_name", "block_nr", "random_seed", "digits", "tiles", "fov", "speech"
             ]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
@@ -466,7 +475,9 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["height_degrees", "font_name", "rgb", "random_method"]
         } else if dictionary.keys.contains("number_horizontal") {
             preferredOrder = [
-                "width_degrees", "height_degrees", "stroke_degrees", "fill_rgb", "stroke_rgb",
+                "width_degrees", "height_degrees", "gutter_degrees", "outer_gutter_degrees",
+                "corner_radius_degrees", "outer_gutter_corner_radius_degrees",
+                "fill_rgb", "gutter_rgb",
                 "number_horizontal", "number_vertical"
             ]
         } else if dictionary.keys.contains("peak_opacity") {

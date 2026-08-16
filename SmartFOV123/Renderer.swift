@@ -245,7 +245,7 @@ actor Renderer {
 
         let depthDescriptor = MTLDepthStencilDescriptor()
         // Every SmartFOV123 primitive lies on one stimulus plane. Comparing
-        // coplanar depths causes unstable z-fighting between the FOV, boxes,
+        // coplanar depths causes unstable z-fighting between the FOV, tiles,
         // and glyphs. Always accept fragments so painter's order determines
         // their appearance while retaining depth writes for composition.
         depthDescriptor.depthCompareFunction = .always

@@ -97,13 +97,16 @@ struct StimulusConfiguration: Sendable {
     let digitRGB: RGB
     let digitRandomMethod: DigitRandomMethod
 
-    let digitBoxWidthArcmin: Float
-    let digitBoxHeightArcmin: Float
-    let digitBoxStrokeArcmin: Float
-    let digitBoxFillRGB: RGB
-    let digitBoxStrokeRGB: RGB
-    let numberOfDigitBoxesHorizontal: Int
-    let numberOfDigitBoxesVertical: Int
+    let tileWidthArcmin: Float
+    let tileHeightArcmin: Float
+    let tileGutterArcmin: Float
+    let tileOuterGutterArcmin: Float
+    let tileCornerRadiusArcmin: Float
+    let tileOuterGutterCornerRadiusArcmin: Float
+    let tileFillRGB: RGB
+    let tileGutterRGB: RGB
+    let numberOfTilesHorizontal: Int
+    let numberOfTilesVertical: Int
 
     let fovWidthDegrees: Float
     let fovHeightDegrees: Float
@@ -319,21 +322,27 @@ private struct DigitPatch: Decodable {
     }
 }
 
-private struct BoxPatch: Decodable {
+private struct TilePatch: Decodable {
     let widthDegrees: Float?
     let heightDegrees: Float?
-    let strokeDegrees: Float?
+    let gutterDegrees: Float?
+    let outerGutterDegrees: Float?
+    let cornerRadiusDegrees: Float?
+    let outerGutterCornerRadiusDegrees: Float?
     let fillRGB: RGB?
-    let strokeRGB: RGB?
+    let gutterRGB: RGB?
     let numberHorizontal: Int?
     let numberVertical: Int?
 
     private enum CodingKeys: String, CodingKey {
         case widthDegrees = "width_degrees"
         case heightDegrees = "height_degrees"
-        case strokeDegrees = "stroke_degrees"
+        case gutterDegrees = "gutter_degrees"
+        case outerGutterDegrees = "outer_gutter_degrees"
+        case cornerRadiusDegrees = "corner_radius_degrees"
+        case outerGutterCornerRadiusDegrees = "outer_gutter_corner_radius_degrees"
         case fillRGB = "fill_rgb"
-        case strokeRGB = "stroke_rgb"
+        case gutterRGB = "gutter_rgb"
         case numberHorizontal = "number_horizontal"
         case numberVertical = "number_vertical"
     }
@@ -377,7 +386,7 @@ private struct ConditionDefinition: Decodable {
     let repeats: InheritedField<Int>
     let randomSeed: InheritedField<RandomSeedSpecification>
     let digits: DigitPatch?
-    let boxes: BoxPatch?
+    let tiles: TilePatch?
     let fov: FOVPatch?
     let speech: SpeechPatch?
 
@@ -385,7 +394,7 @@ private struct ConditionDefinition: Decodable {
         case name, inherits, repeats
         case randomSeed = "random_seed"
         case blockNumber = "block_nr"
-        case digits, boxes, fov, speech
+        case digits, tiles, fov, speech
     }
 
     init(from decoder: Decoder) throws {
@@ -400,7 +409,7 @@ private struct ConditionDefinition: Decodable {
             from: container
         )
         digits = try container.decodeIfPresent(DigitPatch.self, forKey: .digits)
-        boxes = try container.decodeIfPresent(BoxPatch.self, forKey: .boxes)
+        tiles = try container.decodeIfPresent(TilePatch.self, forKey: .tiles)
         fov = try container.decodeIfPresent(FOVPatch.self, forKey: .fov)
         speech = try container.decodeIfPresent(SpeechPatch.self, forKey: .speech)
     }
@@ -421,7 +430,7 @@ private struct ResolvedConditionPatch {
     var repeats: Int?
     var randomSeed: RandomSeedSpecification?
     var digits = ResolvedDigits()
-    var boxes = ResolvedBoxes()
+    var tiles = ResolvedTiles()
     var fov = ResolvedFOV()
     var aliases: [String: [String]] = [:]
 
@@ -436,14 +445,18 @@ private struct ResolvedConditionPatch {
             digits.rgb = patch.rgb ?? digits.rgb
             digits.randomMethod = patch.randomMethod ?? digits.randomMethod
         }
-        if let patch = definition.boxes {
-            boxes.widthDegrees = patch.widthDegrees ?? boxes.widthDegrees
-            boxes.heightDegrees = patch.heightDegrees ?? boxes.heightDegrees
-            boxes.strokeDegrees = patch.strokeDegrees ?? boxes.strokeDegrees
-            boxes.fillRGB = patch.fillRGB ?? boxes.fillRGB
-            boxes.strokeRGB = patch.strokeRGB ?? boxes.strokeRGB
-            boxes.numberHorizontal = patch.numberHorizontal ?? boxes.numberHorizontal
-            boxes.numberVertical = patch.numberVertical ?? boxes.numberVertical
+        if let patch = definition.tiles {
+            tiles.widthDegrees = patch.widthDegrees ?? tiles.widthDegrees
+            tiles.heightDegrees = patch.heightDegrees ?? tiles.heightDegrees
+            tiles.gutterDegrees = patch.gutterDegrees ?? tiles.gutterDegrees
+            tiles.outerGutterDegrees = patch.outerGutterDegrees ?? tiles.outerGutterDegrees
+            tiles.cornerRadiusDegrees = patch.cornerRadiusDegrees ?? tiles.cornerRadiusDegrees
+            tiles.outerGutterCornerRadiusDegrees = patch.outerGutterCornerRadiusDegrees
+                ?? tiles.outerGutterCornerRadiusDegrees
+            tiles.fillRGB = patch.fillRGB ?? tiles.fillRGB
+            tiles.gutterRGB = patch.gutterRGB ?? tiles.gutterRGB
+            tiles.numberHorizontal = patch.numberHorizontal ?? tiles.numberHorizontal
+            tiles.numberVertical = patch.numberVertical ?? tiles.numberVertical
         }
         if let patch = definition.fov {
             fov.eye = patch.eye ?? fov.eye
@@ -471,12 +484,15 @@ private struct ResolvedDigits {
     var randomMethod: DigitRandomMethod?
 }
 
-private struct ResolvedBoxes {
+private struct ResolvedTiles {
     var widthDegrees: Float?
     var heightDegrees: Float?
-    var strokeDegrees: Float?
+    var gutterDegrees: Float?
+    var outerGutterDegrees: Float?
+    var cornerRadiusDegrees: Float?
+    var outerGutterCornerRadiusDegrees: Float?
     var fillRGB: RGB?
-    var strokeRGB: RGB?
+    var gutterRGB: RGB?
     var numberHorizontal: Int?
     var numberVertical: Int?
 }
@@ -642,7 +658,7 @@ private enum ConditionResolver {
         }
         let gridSizes = Set(trials.map { trial in
             let stimulus = trial.configuration.stimulus
-            return "\(stimulus.numberOfDigitBoxesHorizontal)x\(stimulus.numberOfDigitBoxesVertical)"
+            return "\(stimulus.numberOfTilesHorizontal)x\(stimulus.numberOfTilesVertical)"
         })
         let gridSizeDescription = gridSizes.sorted().joined(separator: " or ")
         let resolvedInstructions = instructions
@@ -759,13 +775,18 @@ private enum ConditionResolver {
         guard let fontName = patch.digits.fontName else { try missing("digits.font_name") }
         guard patch.digits.rgb != nil else { try missing("digits.rgb") }
         guard patch.digits.randomMethod != nil else { try missing("digits.random_method") }
-        guard let boxWidth = patch.boxes.widthDegrees else { try missing("boxes.width_degrees") }
-        guard let boxHeight = patch.boxes.heightDegrees else { try missing("boxes.height_degrees") }
-        guard let boxStroke = patch.boxes.strokeDegrees else { try missing("boxes.stroke_degrees") }
-        guard patch.boxes.fillRGB != nil else { try missing("boxes.fill_rgb") }
-        guard patch.boxes.strokeRGB != nil else { try missing("boxes.stroke_rgb") }
-        guard let columns = patch.boxes.numberHorizontal else { try missing("boxes.number_horizontal") }
-        guard let rows = patch.boxes.numberVertical else { try missing("boxes.number_vertical") }
+        guard let tileWidth = patch.tiles.widthDegrees else { try missing("tiles.width_degrees") }
+        guard let tileHeight = patch.tiles.heightDegrees else { try missing("tiles.height_degrees") }
+        guard let tileGutter = patch.tiles.gutterDegrees else { try missing("tiles.gutter_degrees") }
+        guard let tileOuterGutter = patch.tiles.outerGutterDegrees else { try missing("tiles.outer_gutter_degrees") }
+        guard let tileCornerRadius = patch.tiles.cornerRadiusDegrees else { try missing("tiles.corner_radius_degrees") }
+        guard let tileOuterGutterCornerRadius = patch.tiles.outerGutterCornerRadiusDegrees else {
+            try missing("tiles.outer_gutter_corner_radius_degrees")
+        }
+        guard patch.tiles.fillRGB != nil else { try missing("tiles.fill_rgb") }
+        guard patch.tiles.gutterRGB != nil else { try missing("tiles.gutter_rgb") }
+        guard let columns = patch.tiles.numberHorizontal else { try missing("tiles.number_horizontal") }
+        guard let rows = patch.tiles.numberVertical else { try missing("tiles.number_vertical") }
         guard patch.fov.eye != nil else { try missing("fov.eye") }
         guard patch.fov.mode != nil else { try missing("fov.mode") }
         guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peak_opacity") }
@@ -809,8 +830,8 @@ private enum ConditionResolver {
 
         let positive: [(String, Float)] = [
             ("digits.height_degrees", digitHeight),
-            ("boxes.width_degrees", boxWidth),
-            ("boxes.height_degrees", boxHeight),
+            ("tiles.width_degrees", tileWidth),
+            ("tiles.height_degrees", tileHeight),
             ("fov.width_degrees", fovWidth),
             ("fov.height_degrees", fovHeight),
             ("fov.distance_meters", distance)
@@ -819,7 +840,10 @@ private enum ConditionResolver {
             throw invalid(definitionName, "\(name) must be finite and greater than zero.")
         }
         let nonnegative: [(String, Float)] = [
-            ("boxes.stroke_degrees", boxStroke),
+            ("tiles.gutter_degrees", tileGutter),
+            ("tiles.outer_gutter_degrees", tileOuterGutter),
+            ("tiles.corner_radius_degrees", tileCornerRadius),
+            ("tiles.outer_gutter_corner_radius_degrees", tileOuterGutterCornerRadius),
             ("fov.border_stroke_arcmin", borderStroke)
         ]
         for (name, value) in nonnegative where !value.isFinite || value < 0 {
@@ -832,25 +856,34 @@ private enum ConditionResolver {
             throw invalid(definitionName, "fov.peak_opacity must be between 0 and 1.")
         }
         guard columns >= 4 else {
-            throw invalid(definitionName, "boxes.number_horizontal must be at least 4.")
+            throw invalid(definitionName, "tiles.number_horizontal must be at least 4.")
         }
         guard rows >= 4 else {
-            throw invalid(definitionName, "boxes.number_vertical must be at least 4.")
+            throw invalid(definitionName, "tiles.number_vertical must be at least 4.")
         }
         guard columns <= 254, rows <= 254 else {
             throw invalid(definitionName, "each box-grid dimension may be at most 254.")
         }
-        guard boxStroke * 2 < min(boxWidth, boxHeight) else {
-            throw invalid(definitionName, "boxes.stroke_degrees is too large for the boxes.")
+        guard tileGutter < min(tileWidth, tileHeight) else {
+            throw invalid(definitionName, "tiles.gutter_degrees is too large for the tiles.")
+        }
+        guard tileCornerRadius * 2 < min(tileWidth, tileHeight) else {
+            throw invalid(definitionName, "tiles.corner_radius_degrees is too large for the tiles.")
         }
         guard borderStroke / 60 * 2 < min(fovWidth, fovHeight) else {
             throw invalid(definitionName, "fov.border_stroke_arcmin is too large for the FOV.")
         }
-        guard boxWidth * Float(columns) <= fovWidth,
-              boxHeight * Float(rows) <= fovHeight else {
-            throw invalid(definitionName, "the centered box grid does not fit inside the FOV.")
+        let gridWidth = tileWidth * Float(columns)
+            + tileGutter * Float(columns - 1) + tileOuterGutter * 2
+        let gridHeight = tileHeight * Float(rows)
+            + tileGutter * Float(rows - 1) + tileOuterGutter * 2
+        guard gridWidth <= fovWidth, gridHeight <= fovHeight else {
+            throw invalid(definitionName, "the centered tile grid does not fit inside the FOV.")
         }
-        let spaceAboveCenteredGrid = (fovHeight - boxHeight * Float(rows)) / 2
+        guard tileOuterGutterCornerRadius * 2 <= min(gridWidth, gridHeight) else {
+            throw invalid(definitionName, "tiles.outer_gutter_corner_radius_degrees is too large for the tile grid.")
+        }
+        let spaceAboveCenteredGrid = (fovHeight - gridHeight) / 2
         guard spaceAboveCenteredGrid >= digitHeight * 1.5 else {
             throw invalid(
                 definitionName,
@@ -924,13 +957,16 @@ private enum ConditionResolver {
                 digitFontName: patch.digits.fontName!,
                 digitRGB: patch.digits.rgb!,
                 digitRandomMethod: patch.digits.randomMethod!,
-                digitBoxWidthArcmin: patch.boxes.widthDegrees! * 60,
-                digitBoxHeightArcmin: patch.boxes.heightDegrees! * 60,
-                digitBoxStrokeArcmin: patch.boxes.strokeDegrees! * 60,
-                digitBoxFillRGB: patch.boxes.fillRGB!,
-                digitBoxStrokeRGB: patch.boxes.strokeRGB!,
-                numberOfDigitBoxesHorizontal: patch.boxes.numberHorizontal!,
-                numberOfDigitBoxesVertical: patch.boxes.numberVertical!,
+                tileWidthArcmin: patch.tiles.widthDegrees! * 60,
+                tileHeightArcmin: patch.tiles.heightDegrees! * 60,
+                tileGutterArcmin: patch.tiles.gutterDegrees! * 60,
+                tileOuterGutterArcmin: patch.tiles.outerGutterDegrees! * 60,
+                tileCornerRadiusArcmin: patch.tiles.cornerRadiusDegrees! * 60,
+                tileOuterGutterCornerRadiusArcmin: patch.tiles.outerGutterCornerRadiusDegrees! * 60,
+                tileFillRGB: patch.tiles.fillRGB!,
+                tileGutterRGB: patch.tiles.gutterRGB!,
+                numberOfTilesHorizontal: patch.tiles.numberHorizontal!,
+                numberOfTilesVertical: patch.tiles.numberVertical!,
                 fovWidthDegrees: patch.fov.widthDegrees!,
                 fovHeightDegrees: patch.fov.heightDegrees!,
                 fovHorizontalOffsetDegrees: patch.fov.horizontalOffsetDegrees!,
@@ -985,7 +1021,7 @@ private enum JSONShapeValidator {
             let condition = try dictionary(rawCondition, path: path)
             try keys(
                 condition,
-                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "boxes", "fov", "speech"],
+                allowed: ["name", "inherits", "block_nr", "repeats", "random_seed", "digits", "tiles", "fov", "speech"],
                 path: path
             )
             try section(
@@ -994,9 +1030,9 @@ private enum JSONShapeValidator {
                 allowed: ["height_degrees", "font_name", "rgb", "random_method"]
             )
             try section(
-                condition["boxes"],
-                path: "\(path).boxes",
-                allowed: ["width_degrees", "height_degrees", "stroke_degrees", "fill_rgb", "stroke_rgb", "number_horizontal", "number_vertical"]
+                condition["tiles"],
+                path: "\(path).tiles",
+                allowed: ["width_degrees", "height_degrees", "gutter_degrees", "outer_gutter_degrees", "corner_radius_degrees", "outer_gutter_corner_radius_degrees", "fill_rgb", "gutter_rgb", "number_horizontal", "number_vertical"]
             )
             try section(
                 condition["fov"],
@@ -1049,8 +1085,8 @@ private enum JSONShapeValidator {
 
 private enum NumberGridGenerator {
     static func makeGrid(using config: StimulusConfiguration) -> NumberGrid {
-        let rows = config.numberOfDigitBoxesVertical
-        let columns = config.numberOfDigitBoxesHorizontal
+        let rows = config.numberOfTilesVertical
+        let columns = config.numberOfTilesHorizontal
         var random = SplitMix64(seed: config.randomSeed)
 
         while true {

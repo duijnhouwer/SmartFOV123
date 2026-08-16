@@ -14,17 +14,20 @@
       "repeats": 0,
       "random_seed": null,
       "digits": {
-        "height_degrees": 1.4,
+        "height_degrees": 1.2,
         "font_name": "Arial",
         "rgb": [0.2, 0.2, 0.2],
         "random_method": "flat_distribution"
       },
-      "boxes": {
+      "tiles": {
         "width_degrees": 2.0,
         "height_degrees": 2.0,
-        "stroke_degrees": 0.1,
-        "fill_rgb": [0, 0, 0],
-        "stroke_rgb": [0.0, 0.0, 0.0],
+        "gutter_degrees": 0.2,
+        "outer_gutter_degrees": 0.3,
+        "corner_radius_degrees": 0.3,
+        "outer_gutter_corner_radius_degrees": 0.5,
+        "fill_rgb": [1, 1, 1],
+        "gutter_rgb": [0, 0, 0],
         "number_horizontal": 6,
         "number_vertical": 6
       },
@@ -36,8 +39,8 @@
         "height_degrees": 21.21,
         "horizontal_offset_degrees": 0.0,
         "vertical_offset_degrees": 0.0,
-        "background_rgb": [0.0, 0.0, 0.0],
-        "border_stroke_arcmin": 5,
+        "background_rgb": [1.0, 1.0, 1.0],
+        "border_stroke_arcmin": 0,
         "border_rgb": [0.0, 0.0, 0.0],
         "distance_meters": 1.5
       },
