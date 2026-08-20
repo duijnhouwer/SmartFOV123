@@ -16,8 +16,9 @@ final class MetronomePlayer {
     private let audioState = AudioState()
 
     func start(
-        startSeconds: [Int],
-        beatsPerMinute: [Int],
+        minimumBeatsPerMinute: Int,
+        maximumBeatsPerMinute: Int,
+        incrementIntervalBeats: Int,
         volume: Float,
         durationSeconds: Int
     ) {
@@ -34,13 +35,21 @@ final class MetronomePlayer {
             audioState.tickPlayer?.volume = playbackVolume
             audioState.tockPlayer?.volume = playbackVolume
             let start = DispatchTime.now().uptimeNanoseconds
+            let tempos = Self.tempoProgression(
+                minimumBeatsPerMinute: minimumBeatsPerMinute,
+                maximumBeatsPerMinute: maximumBeatsPerMinute,
+                incrementIntervalBeats: incrementIntervalBeats,
+                durationSeconds: durationSeconds
+            )
             self.scheduleBeat(
                 generation: generation,
                 sessionStart: start,
                 stageIndex: 0,
                 beatIndex: 0,
-                startSeconds: startSeconds,
-                beatsPerMinute: beatsPerMinute,
+                totalBeatIndex: 0,
+                beatTimeSeconds: 0,
+                tempos: tempos,
+                incrementIntervalBeats: incrementIntervalBeats,
                 durationSeconds: durationSeconds
             )
         }
@@ -81,50 +90,20 @@ final class MetronomePlayer {
         sessionStart: UInt64,
         stageIndex: Int,
         beatIndex: Int,
-        startSeconds: [Int],
-        beatsPerMinute: [Int],
+        totalBeatIndex: Int,
+        beatTimeSeconds: Double,
+        tempos: [Double],
+        incrementIntervalBeats: Int,
         durationSeconds: Int
     ) {
-        guard startSeconds.indices.contains(stageIndex),
-              beatsPerMinute.indices.contains(stageIndex) else { return }
-        let stageStartSeconds = startSeconds[stageIndex]
-        guard stageStartSeconds >= 0 else {
-            scheduleBeat(
-                generation: generation,
-                sessionStart: sessionStart,
-                stageIndex: stageIndex + 1,
-                beatIndex: 0,
-                startSeconds: startSeconds,
-                beatsPerMinute: beatsPerMinute,
-                durationSeconds: durationSeconds
-            )
-            return
-        }
-        guard stageStartSeconds < durationSeconds else { return }
-        let nextEnabledStart = startSeconds.dropFirst(stageIndex + 1).first {
-            $0 >= 0
-        }
-        let stageEndSeconds = min(nextEnabledStart ?? durationSeconds, durationSeconds)
-        let beatOffsetSeconds = Double(beatIndex) * 60 / Double(beatsPerMinute[stageIndex])
-        let beatTimeSeconds = Double(stageStartSeconds) + beatOffsetSeconds
-        guard beatTimeSeconds < Double(stageEndSeconds) - 0.000_001 else {
-            scheduleBeat(
-                generation: generation,
-                sessionStart: sessionStart,
-                stageIndex: stageIndex + 1,
-                beatIndex: 0,
-                startSeconds: startSeconds,
-                beatsPerMinute: beatsPerMinute,
-                durationSeconds: durationSeconds
-            )
-            return
-        }
+        guard tempos.indices.contains(stageIndex),
+              beatTimeSeconds < Double(durationSeconds) - 0.000_001 else { return }
 
         let beatNanoseconds = UInt64((beatTimeSeconds * 1_000_000_000).rounded())
         let deadline = DispatchTime(uptimeNanoseconds: sessionStart + beatNanoseconds)
         audioQueue.asyncAfter(deadline: deadline) { [weak self] in
             guard let self, self.audioState.generation == generation else { return }
-            let player = beatIndex.isMultiple(of: 4)
+            let player = totalBeatIndex.isMultiple(of: 4)
                 ? self.audioState.tickPlayer
                 : self.audioState.tockPlayer
             player?.currentTime = 0
@@ -134,13 +113,56 @@ final class MetronomePlayer {
             self.scheduleBeat(
                 generation: generation,
                 sessionStart: sessionStart,
-                stageIndex: stageIndex,
-                beatIndex: beatIndex + 1,
-                startSeconds: startSeconds,
-                beatsPerMinute: beatsPerMinute,
+                stageIndex: beatIndex + 1 == incrementIntervalBeats
+                    ? min(stageIndex + 1, tempos.count - 1)
+                    : stageIndex,
+                beatIndex: (beatIndex + 1) % incrementIntervalBeats,
+                totalBeatIndex: totalBeatIndex + 1,
+                beatTimeSeconds: beatTimeSeconds + 60 / tempos[stageIndex],
+                tempos: tempos,
+                incrementIntervalBeats: incrementIntervalBeats,
                 durationSeconds: durationSeconds
             )
         }
+    }
+
+    /// Selects the integer number of full beat intervals whose geometric tempo
+    /// progression is closest to the session duration. Every step therefore
+    /// uses the same percentage increase, and the last tempo is exactly max.
+    private static func tempoProgression(
+        minimumBeatsPerMinute: Int,
+        maximumBeatsPerMinute: Int,
+        incrementIntervalBeats: Int,
+        durationSeconds: Int
+    ) -> [Double] {
+        let minimum = Double(minimumBeatsPerMinute)
+        let maximum = Double(maximumBeatsPerMinute)
+        guard maximum > minimum else { return [minimum] }
+
+        let maximumCandidateCount = max(
+            2,
+            Int(ceil(Double(durationSeconds) * maximum / (60 * Double(incrementIntervalBeats)))) + 2
+        )
+        var bestTempos: [Double] = [minimum, maximum]
+        var smallestDurationError = Double.greatestFiniteMagnitude
+
+        for stageCount in 2...maximumCandidateCount {
+            let multiplier = pow(maximum / minimum, 1 / Double(stageCount - 1))
+            let tempos = (0..<stageCount).map { stageIndex in
+                stageIndex == stageCount - 1
+                    ? maximum
+                    : minimum * pow(multiplier, Double(stageIndex))
+            }
+            let progressionDuration = tempos.reduce(0) {
+                $0 + Double(incrementIntervalBeats) * 60 / $1
+            }
+            let error = abs(progressionDuration - Double(durationSeconds))
+            if error < smallestDurationError {
+                smallestDurationError = error
+                bestTempos = tempos
+            }
+        }
+        return bestTempos
     }
 
     private static func loadPlayer(named name: String) -> AVAudioPlayer? {

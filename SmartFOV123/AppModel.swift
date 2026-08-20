@@ -736,8 +736,9 @@ final class AppModel {
         if let stimulus = instantiatedExperiment?.configuration.stimulus {
             timedSessionFinalGongVolume = stimulus.finalGongVolume
             metronomePlayer.start(
-                startSeconds: stimulus.metronomeStartSeconds,
-                beatsPerMinute: stimulus.metronomeBeatsPerMinute,
+                minimumBeatsPerMinute: stimulus.metronomeMinimumBeatsPerMinute,
+                maximumBeatsPerMinute: stimulus.metronomeMaximumBeatsPerMinute,
+                incrementIntervalBeats: stimulus.metronomeIncrementIntervalBeats,
                 volume: stimulus.metronomeVolume,
                 durationSeconds: seconds
             )

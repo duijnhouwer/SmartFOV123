@@ -160,8 +160,9 @@ struct StimulusConfiguration: Sendable {
     let timeBarBackRGB: RGB
     let timeBarBackHeightArcmin: Float
     let timeBarBackCornerRadiusArcmin: Float
-    let metronomeStartSeconds: [Int]
-    let metronomeBeatsPerMinute: [Int]
+    let metronomeMinimumBeatsPerMinute: Int
+    let metronomeMaximumBeatsPerMinute: Int
+    let metronomeIncrementIntervalBeats: Int
     let metronomeVolume: Float
     let finalGongVolume: Float
 
@@ -602,13 +603,15 @@ private struct TimerSausagePatch: Decodable {
 }
 
 private struct MetronomePatch: Decodable {
-    let startSeconds: [Int]?
-    let beatsPerMinute: [Int]?
+    let minimumBeatsPerMinute: Int?
+    let maximumBeatsPerMinute: Int?
+    let incrementIntervalBeats: Int?
     let volume: Float?
 
     private enum CodingKeys: String, CodingKey {
-        case startSeconds = "start_seconds"
-        case beatsPerMinute = "beats_per_minute"
+        case minimumBeatsPerMinute = "min_beats_per_minute"
+        case maximumBeatsPerMinute = "max_beats_per_minute"
+        case incrementIntervalBeats = "increment_interval_beats"
         case volume
     }
 }
@@ -777,8 +780,9 @@ private struct ResolvedConditionPatch {
                 ?? timeBar.backCornerRadiusDegrees
         }
         if let patch = definition.timer?.metronome {
-            metronome.startSeconds = patch.startSeconds ?? metronome.startSeconds
-            metronome.beatsPerMinute = patch.beatsPerMinute ?? metronome.beatsPerMinute
+            metronome.minimumBeatsPerMinute = patch.minimumBeatsPerMinute ?? metronome.minimumBeatsPerMinute
+            metronome.maximumBeatsPerMinute = patch.maximumBeatsPerMinute ?? metronome.maximumBeatsPerMinute
+            metronome.incrementIntervalBeats = patch.incrementIntervalBeats ?? metronome.incrementIntervalBeats
             metronome.volume = patch.volume ?? metronome.volume
         }
         metronome.finalGongVolume = definition.timer?.finalGongVolume
@@ -854,8 +858,9 @@ private struct ResolvedTimeBar {
 }
 
 private struct ResolvedMetronome {
-    var startSeconds: [Int]?
-    var beatsPerMinute: [Int]?
+    var minimumBeatsPerMinute: Int?
+    var maximumBeatsPerMinute: Int?
+    var incrementIntervalBeats: Int?
     var volume: Float?
     var finalGongVolume: Float?
 }
@@ -1099,11 +1104,14 @@ private enum ConditionResolver {
         guard let timeBarBackHeight = patch.timeBar.backHeightDegrees else {
             try missing("timer.sausage.back_height_degrees")
         }
-        guard let metronomeStarts = patch.metronome.startSeconds else {
-            try missing("timer.metronome.start_seconds")
+        guard let metronomeMinimumBPM = patch.metronome.minimumBeatsPerMinute else {
+            try missing("timer.metronome.min_beats_per_minute")
         }
-        guard let metronomeBPM = patch.metronome.beatsPerMinute else {
-            try missing("timer.metronome.beats_per_minute")
+        guard let metronomeMaximumBPM = patch.metronome.maximumBeatsPerMinute else {
+            try missing("timer.metronome.max_beats_per_minute")
+        }
+        guard let metronomeIncrementInterval = patch.metronome.incrementIntervalBeats else {
+            try missing("timer.metronome.increment_interval_beats")
         }
         guard let metronomeVolume = patch.metronome.volume else {
             try missing("timer.metronome.volume")
@@ -1252,27 +1260,14 @@ private enum ConditionResolver {
         guard timeBarBackCornerRadius * 2 <= timeBarBackHeight else {
             throw invalid(definitionName, "timer.sausage.back_corner_radius_degrees is too large for back_height_degrees.")
         }
-        guard !metronomeStarts.isEmpty,
-              metronomeStarts.count == metronomeBPM.count else {
-            throw invalid(
-                definitionName,
-                "timer.metronome start_seconds and beats_per_minute must be nonempty arrays of equal length."
-            )
+        guard metronomeMinimumBPM > 0 else {
+            throw invalid(definitionName, "timer.metronome.min_beats_per_minute must be greater than zero.")
         }
-        let enabledMetronomeStarts = metronomeStarts.filter { $0 >= 0 }
-        guard zip(enabledMetronomeStarts, enabledMetronomeStarts.dropFirst()).allSatisfy({
-            $0.0 < $0.1
-        }) else {
-            throw invalid(
-                definitionName,
-                "enabled timer.metronome.start_seconds values must be strictly increasing; negative values disable their paired BPM stages."
-            )
+        guard metronomeMaximumBPM >= metronomeMinimumBPM else {
+            throw invalid(definitionName, "timer.metronome.max_beats_per_minute must be at least min_beats_per_minute.")
         }
-        guard metronomeBPM.allSatisfy({ $0 > 0 }) else {
-            throw invalid(
-                definitionName,
-                "timer.metronome.beats_per_minute values must be greater than zero."
-            )
+        guard metronomeIncrementInterval > 0 else {
+            throw invalid(definitionName, "timer.metronome.increment_interval_beats must be greater than zero.")
         }
         guard metronomeVolume.isFinite, (0...1).contains(metronomeVolume) else {
             throw invalid(
@@ -1451,8 +1446,9 @@ private enum ConditionResolver {
                 timeBarBackRGB: patch.timeBar.backRGB!,
                 timeBarBackHeightArcmin: patch.timeBar.backHeightDegrees! * 60,
                 timeBarBackCornerRadiusArcmin: patch.timeBar.backCornerRadiusDegrees! * 60,
-                metronomeStartSeconds: patch.metronome.startSeconds!,
-                metronomeBeatsPerMinute: patch.metronome.beatsPerMinute!,
+                metronomeMinimumBeatsPerMinute: patch.metronome.minimumBeatsPerMinute!,
+                metronomeMaximumBeatsPerMinute: patch.metronome.maximumBeatsPerMinute!,
+                metronomeIncrementIntervalBeats: patch.metronome.incrementIntervalBeats!,
                 metronomeVolume: patch.metronome.volume!,
                 finalGongVolume: patch.metronome.finalGongVolume!,
                 correctFeedbackFile: patch.feedbackSounds.correctFile!,
@@ -1553,7 +1549,7 @@ private enum JSONShapeValidator {
                 try section(
                     timer["metronome"],
                     path: "\(path).timer.metronome",
-                    allowed: ["start_seconds", "beats_per_minute", "volume"]
+                    allowed: ["min_beats_per_minute", "max_beats_per_minute", "increment_interval_beats", "volume"]
                 )
             }
             try section(condition["feedback_sounds"], path: "\(path).feedback_sounds", allowed: ["correct", "wrong"])

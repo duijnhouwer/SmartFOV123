@@ -356,8 +356,9 @@ private struct CompletedTrial: Encodable {
                     backCornerRadiusDegrees: stimulus.timeBarBackCornerRadiusArcmin / 60
                 ),
                 metronome: .init(
-                    startSeconds: stimulus.metronomeStartSeconds,
-                    beatsPerMinute: stimulus.metronomeBeatsPerMinute,
+                    minimumBeatsPerMinute: stimulus.metronomeMinimumBeatsPerMinute,
+                    maximumBeatsPerMinute: stimulus.metronomeMaximumBeatsPerMinute,
+                    incrementIntervalBeats: stimulus.metronomeIncrementIntervalBeats,
                     volume: stimulus.metronomeVolume
                 ),
                 finalGongVolume: stimulus.finalGongVolume
@@ -487,13 +488,15 @@ private struct CompletedTrial: Encodable {
     }
 
     struct Metronome: Encodable {
-        let startSeconds: [Int]
-        let beatsPerMinute: [Int]
+        let minimumBeatsPerMinute: Int
+        let maximumBeatsPerMinute: Int
+        let incrementIntervalBeats: Int
         let volume: Float
 
         private enum CodingKeys: String, CodingKey {
-            case startSeconds = "start_seconds"
-            case beatsPerMinute = "beats_per_minute"
+            case minimumBeatsPerMinute = "min_beats_per_minute"
+            case maximumBeatsPerMinute = "max_beats_per_minute"
+            case incrementIntervalBeats = "increment_interval_beats"
             case volume
         }
     }
@@ -684,8 +687,8 @@ private enum JSONPrettyPrinter {
             ]
         } else if dictionary.keys.contains("metronome") {
             preferredOrder = ["sausage", "metronome", "final_gong_volume"]
-        } else if dictionary.keys.contains("beats_per_minute") {
-            preferredOrder = ["start_seconds", "beats_per_minute", "volume"]
+        } else if dictionary.keys.contains("min_beats_per_minute") {
+            preferredOrder = ["min_beats_per_minute", "max_beats_per_minute", "increment_interval_beats", "volume"]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
         } else if dictionary.keys.contains("start_time_ms") {
