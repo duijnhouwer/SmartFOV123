@@ -3,16 +3,17 @@ import Metal
 import SwiftUI
 
 struct StimulusCompositorLayer: CompositorContent, CompositorLayerConfiguration {
-    let appModel: AppModel
+    @Bindable var appModel: AppModel
 
     var body: some CompositorContent {
         CompositorLayer(configuration: self) { @MainActor layerRenderer in
             appModel.startWindowlessExperienceIfNeeded()
             Renderer.start(layerRenderer, appModel: appModel)
         }
-        .preferredSurroundingsEffect(
-            appModel.passthroughDimming.map { SurroundingsEffect.dim(intensity: $0) }
-        )
+        // Apple's intensity is the amount of passthrough retained: 1 is
+        // unchanged and 0 is black. The protocol deliberately uses the more
+        // intuitive inverse convention, where 1 means fully dimmed.
+        .preferredSurroundingsEffect(.dim(intensity: 1 - appModel.passthroughDimming))
     }
 
     func makeConfiguration(

@@ -77,13 +77,13 @@ final class AppModel {
         instantiatedExperiment
     }
 
-    var passthroughDimming: Double? {
+    var passthroughDimming: Double {
         switch trialPhase {
         case .transitioning, .targetCue, .search:
-            return configuredPassthroughDimming > 0 ? configuredPassthroughDimming : nil
+            return configuredPassthroughDimming
         case .configurationError, .protocolSelection, .participantNumber,
              .participantConfirmation, .instructions, .debriefing:
-            return nil
+            return 0
         }
     }
 
@@ -178,6 +178,9 @@ final class AppModel {
         }.value
         if let instantiatedExperiment {
             configuredPassthroughDimming = instantiatedExperiment.configuration.display.passthroughDimming
+            print(
+                "SmartFOV123 trial \(trialNumber) passthrough dimming: \(configuredPassthroughDimming)"
+            )
         }
         if hasCompletedExperiment {
             instantiatedExperiment = nil
