@@ -26,8 +26,11 @@ struct TimeBarTexture {
             degrees: stimulus.timeBarCornerRadiusArcmin / 60,
             distance: stimulus.distanceMeters
         )
-        let width = 1024
-        let height = max(2, Int((Float(width) * heightMeters / widthMeters).rounded()))
+        let width = max(2, Int((1024 * stimulus.fovWidthScaleFactor).rounded()))
+        let height = max(
+            2,
+            Int((1024 * heightMeters / widthMeters * stimulus.fovHeightScaleFactor).rounded())
+        )
         let bytesPerRow = width * 4
         var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
 
@@ -52,15 +55,19 @@ struct TimeBarTexture {
                 blue: CGFloat(color.blue),
                 alpha: 1
             )
-            let radius = min(
+            let radiusX = min(
                 CGFloat(radiusMeters / widthMeters) * CGFloat(width),
+                CGFloat(width) / 2
+            )
+            let radiusY = min(
+                CGFloat(radiusMeters / heightMeters) * CGFloat(height),
                 CGFloat(height) / 2
             )
             context.addPath(
                 CGPath(
                     roundedRect: CGRect(x: 0, y: 0, width: width, height: height),
-                    cornerWidth: radius,
-                    cornerHeight: radius,
+                    cornerWidth: radiusX,
+                    cornerHeight: radiusY,
                     transform: nil
                 )
             )

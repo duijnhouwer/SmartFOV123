@@ -59,6 +59,7 @@ struct StimulusTexture {
             Int(ceil(
                 Float(experiment.grid.columns * pixelsPerTile)
                     * fovWidthMeters / gridWidthMeters
+                    * config.fovWidthScaleFactor
             ))
         )
         let height = max(
@@ -66,6 +67,7 @@ struct StimulusTexture {
             Int(ceil(
                 Float(experiment.grid.rows * pixelsPerTile)
                     * fovHeightMeters / gridHeightMeters
+                    * config.fovHeightScaleFactor
             ))
         )
         let bytesPerRow = width * 4

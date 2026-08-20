@@ -393,6 +393,8 @@ private struct CompletedTrial: Encodable {
                 peakOpacity: configuration.display.peakOpacity,
                 widthDegrees: stimulus.fovWidthDegrees,
                 heightDegrees: stimulus.fovHeightDegrees,
+                zoomedWidthDegrees: stimulus.fovZoomedWidthDegrees,
+                zoomedHeightDegrees: stimulus.fovZoomedHeightDegrees,
                 horizontalOffsetDegrees: stimulus.fovHorizontalOffsetDegrees,
                 verticalOffsetDegrees: stimulus.fovVerticalOffsetDegrees,
                 distanceMeters: stimulus.distanceMeters
@@ -537,6 +539,8 @@ private struct CompletedTrial: Encodable {
         let peakOpacity: Float
         let widthDegrees: Float
         let heightDegrees: Float
+        let zoomedWidthDegrees: Float
+        let zoomedHeightDegrees: Float
         let horizontalOffsetDegrees: Float
         let verticalOffsetDegrees: Float
         let distanceMeters: Float
@@ -546,6 +550,8 @@ private struct CompletedTrial: Encodable {
             case peakOpacity = "peak_opacity"
             case widthDegrees = "width_degrees"
             case heightDegrees = "height_degrees"
+            case zoomedWidthDegrees = "zoomed_width_degrees"
+            case zoomedHeightDegrees = "zoomed_height_degrees"
             case horizontalOffsetDegrees = "horizontal_offset_degrees"
             case verticalOffsetDegrees = "vertical_offset_degrees"
             case distanceMeters = "distance_meters"
@@ -699,6 +705,7 @@ private enum JSONPrettyPrinter {
         } else if dictionary.keys.contains("peak_opacity") {
             preferredOrder = [
                 "eye", "mode", "peak_opacity", "width_degrees", "height_degrees",
+                "zoomed_width_degrees", "zoomed_height_degrees",
                 "horizontal_offset_degrees", "vertical_offset_degrees", "distance_meters"
             ]
         } else if dictionary.keys.contains("inner_margin_degrees") {

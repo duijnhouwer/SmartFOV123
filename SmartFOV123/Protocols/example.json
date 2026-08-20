@@ -22,6 +22,8 @@
       "peak_opacity": 0.35,
       "width_degrees": 14.14,
       "height_degrees": 14.14,
+      "zoomed_width_degrees": 21.21,
+      "zoomed_height_degrees": 21.21,
       "horizontal_offset_degrees": 0.0,
       "vertical_offset_degrees": 0.0,
       "distance_meters": 1.5

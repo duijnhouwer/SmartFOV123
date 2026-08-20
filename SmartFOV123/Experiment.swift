@@ -186,9 +186,26 @@ struct StimulusConfiguration: Sendable {
 
     let fovWidthDegrees: Float
     let fovHeightDegrees: Float
+    let fovZoomedWidthDegrees: Float
+    let fovZoomedHeightDegrees: Float
     let fovHorizontalOffsetDegrees: Float
     let fovVerticalOffsetDegrees: Float
     let distanceMeters: Float
+
+    var fovWidthScaleFactor: Float {
+        Self.planarScaleFactor(from: fovWidthDegrees, to: fovZoomedWidthDegrees)
+    }
+
+    var fovHeightScaleFactor: Float {
+        Self.planarScaleFactor(from: fovHeightDegrees, to: fovZoomedHeightDegrees)
+    }
+
+    private static func planarScaleFactor(from sourceDegrees: Float, to zoomedDegrees: Float) -> Float {
+        // This treats the configured offsets as the stimulus center. An offset
+        // changes the exact retinal visual angle at the edges, but intentionally
+        // does not participate in the zoom calculation.
+        tan(zoomedDegrees * .pi / 360) / tan(sourceDegrees * .pi / 360)
+    }
 }
 
 struct ExperimentConfiguration: Sendable {
@@ -618,6 +635,8 @@ private struct FOVPatch: Decodable {
     let peakOpacity: Float?
     let widthDegrees: Float?
     let heightDegrees: Float?
+    let zoomedWidthDegrees: Float?
+    let zoomedHeightDegrees: Float?
     let horizontalOffsetDegrees: Float?
     let verticalOffsetDegrees: Float?
     let distanceMeters: Float?
@@ -627,6 +646,8 @@ private struct FOVPatch: Decodable {
         case peakOpacity = "peak_opacity"
         case widthDegrees = "width_degrees"
         case heightDegrees = "height_degrees"
+        case zoomedWidthDegrees = "zoomed_width_degrees"
+        case zoomedHeightDegrees = "zoomed_height_degrees"
         case horizontalOffsetDegrees = "horizontal_offset_degrees"
         case verticalOffsetDegrees = "vertical_offset_degrees"
         case distanceMeters = "distance_meters"
@@ -748,6 +769,8 @@ private struct ResolvedConditionPatch {
             fov.peakOpacity = patch.peakOpacity ?? fov.peakOpacity
             fov.widthDegrees = patch.widthDegrees ?? fov.widthDegrees
             fov.heightDegrees = patch.heightDegrees ?? fov.heightDegrees
+            fov.zoomedWidthDegrees = patch.zoomedWidthDegrees ?? fov.zoomedWidthDegrees
+            fov.zoomedHeightDegrees = patch.zoomedHeightDegrees ?? fov.zoomedHeightDegrees
             fov.horizontalOffsetDegrees = patch.horizontalOffsetDegrees ?? fov.horizontalOffsetDegrees
             fov.verticalOffsetDegrees = patch.verticalOffsetDegrees ?? fov.verticalOffsetDegrees
             fov.distanceMeters = patch.distanceMeters ?? fov.distanceMeters
@@ -822,6 +845,8 @@ private struct ResolvedFOV {
     var peakOpacity: Float?
     var widthDegrees: Float?
     var heightDegrees: Float?
+    var zoomedWidthDegrees: Float?
+    var zoomedHeightDegrees: Float?
     var horizontalOffsetDegrees: Float?
     var verticalOffsetDegrees: Float?
     var distanceMeters: Float?
@@ -1078,6 +1103,8 @@ private enum ConditionResolver {
         guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peak_opacity") }
         guard let fovWidth = patch.fov.widthDegrees else { try missing("fov.width_degrees") }
         guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.height_degrees") }
+        guard let fovZoomedWidth = patch.fov.zoomedWidthDegrees else { try missing("fov.zoomed_width_degrees") }
+        guard let fovZoomedHeight = patch.fov.zoomedHeightDegrees else { try missing("fov.zoomed_height_degrees") }
         guard let horizontalOffset = patch.fov.horizontalOffsetDegrees else { try missing("fov.horizontal_offset_degrees") }
         guard let verticalOffset = patch.fov.verticalOffsetDegrees else { try missing("fov.vertical_offset_degrees") }
         guard let distance = patch.fov.distanceMeters else { try missing("fov.distance_meters") }
@@ -1120,10 +1147,20 @@ private enum ConditionResolver {
             ("tiles.height_degrees", tileHeight),
             ("fov.width_degrees", fovWidth),
             ("fov.height_degrees", fovHeight),
+            ("fov.zoomed_width_degrees", fovZoomedWidth),
+            ("fov.zoomed_height_degrees", fovZoomedHeight),
             ("fov.distance_meters", distance)
         ]
         for (name, value) in positive where !value.isFinite || value <= 0 {
             throw invalid(definitionName, "\(name) must be finite and greater than zero.")
+        }
+        for (name, value) in [
+            ("fov.width_degrees", fovWidth),
+            ("fov.height_degrees", fovHeight),
+            ("fov.zoomed_width_degrees", fovZoomedWidth),
+            ("fov.zoomed_height_degrees", fovZoomedHeight)
+        ] where value >= 180 {
+            throw invalid(definitionName, "\(name) must be less than 180 degrees.")
         }
         let nonnegative: [(String, Float)] = [
             ("tiles.gutter_degrees", tileGutter),
@@ -1385,6 +1422,8 @@ private enum ConditionResolver {
                 surroundOuterCornerRadiusArcmin: patch.surround.outerCornerRadiusDegrees! * 60,
                 fovWidthDegrees: patch.fov.widthDegrees!,
                 fovHeightDegrees: patch.fov.heightDegrees!,
+                fovZoomedWidthDegrees: patch.fov.zoomedWidthDegrees!,
+                fovZoomedHeightDegrees: patch.fov.zoomedHeightDegrees!,
                 fovHorizontalOffsetDegrees: patch.fov.horizontalOffsetDegrees!,
                 fovVerticalOffsetDegrees: patch.fov.verticalOffsetDegrees!,
                 distanceMeters: patch.fov.distanceMeters!
@@ -1484,7 +1523,7 @@ private enum JSONShapeValidator {
             try section(
                 condition["fov"],
                 path: "\(path).fov",
-                allowed: ["eye", "mode", "peak_opacity", "width_degrees", "height_degrees", "horizontal_offset_degrees", "vertical_offset_degrees", "distance_meters"]
+                allowed: ["eye", "mode", "peak_opacity", "width_degrees", "height_degrees", "zoomed_width_degrees", "zoomed_height_degrees", "horizontal_offset_degrees", "vertical_offset_degrees", "distance_meters"]
             )
             if let rawSpeech = condition["speech"] {
                 let speech = try dictionary(rawSpeech, path: "\(path).speech")

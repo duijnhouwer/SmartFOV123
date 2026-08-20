@@ -60,18 +60,18 @@ private struct StimulusGeometry {
         )
         fovHalfSizeMeters = SIMD2(
             Self.sizeMeters(
-                degrees: configuration.fovWidthDegrees,
+                degrees: configuration.fovZoomedWidthDegrees,
                 distance: configuration.distanceMeters
             ) / 2,
             Self.sizeMeters(
-                degrees: configuration.fovHeightDegrees,
+                degrees: configuration.fovZoomedHeightDegrees,
                 distance: configuration.distanceMeters
             ) / 2
         )
         digitHeightMeters = Self.sizeMeters(
             degrees: configuration.digitHeightArcmin / 60,
             distance: configuration.distanceMeters
-        )
+        ) * configuration.fovHeightScaleFactor
         let tileWidthMeters = Self.sizeMeters(
             degrees: configuration.tileWidthArcmin / 60,
             distance: configuration.distanceMeters
@@ -92,17 +92,19 @@ private struct StimulusGeometry {
             degrees: configuration.timeBarBackHeightArcmin / 60,
             distance: configuration.distanceMeters
         )
-        timeBarWidthMeters = tileWidthMeters * Float(configuration.numberOfTilesHorizontal)
-            + gutterMeters * Float(configuration.numberOfTilesHorizontal - 1)
+        timeBarWidthMeters = (tileWidthMeters * Float(configuration.numberOfTilesHorizontal)
+            + gutterMeters * Float(configuration.numberOfTilesHorizontal - 1))
+            * configuration.fovWidthScaleFactor
         timeBarLeftMeters = fovCenterMeters.x - timeBarWidthMeters / 2
         let gridHeightMeters = tileHeightMeters * Float(configuration.numberOfTilesVertical)
             + gutterMeters * Float(configuration.numberOfTilesVertical - 1)
             + innerMarginMeters * 2
-        timeBarCenterYMeters = fovCenterMeters.y - gridHeightMeters / 2 - backHeightMeters / 2
+        timeBarCenterYMeters = fovCenterMeters.y
+            - (gridHeightMeters / 2 + backHeightMeters / 2) * configuration.fovHeightScaleFactor
         timeBarHalfHeightMeters = Self.sizeMeters(
             degrees: configuration.timeBarHeightArcmin / 60,
             distance: configuration.distanceMeters
-        ) / 2
+        ) * configuration.fovHeightScaleFactor / 2
     }
 
     private static func sizeMeters(degrees: Float, distance: Float) -> Float {
