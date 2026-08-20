@@ -57,11 +57,11 @@ final class AppModel {
 
     init() {
         do {
-            let catalog = try ProtocolCatalog.loadBundled()
+            let catalog = try ProtocolCatalog.loadAvailable()
             availablePlans = catalog.plans
             foveatedRendering = catalog.foveatedRendering
-            plan = catalog.plans.count == 1 ? catalog.plans[0] : nil
-            trialPhase = plan == nil ? .protocolSelection : .participantNumber
+            plan = nil
+            trialPhase = .protocolSelection
         } catch {
             availablePlans = []
             foveatedRendering = true

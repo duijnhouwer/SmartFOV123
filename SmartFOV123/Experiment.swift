@@ -320,9 +320,51 @@ struct ProtocolCatalog: Sendable {
     let plans: [ExperimentPlan]
     let foveatedRendering: Bool
 
-    static func loadBundled() throws -> ProtocolCatalog {
-        let urls = Bundle.main.urls(forResourcesWithExtension: "json", subdirectory: nil) ?? []
-        let candidates = urls.filter {
+    static func loadAvailable() throws -> ProtocolCatalog {
+        let fileManager = FileManager.default
+        let documentsURL: URL
+        do {
+            documentsURL = try fileManager.url(
+                for: .documentDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+        } catch {
+            throw ExperimentError.protocolDirectoryUnavailable(error)
+        }
+
+        let protocolsURL = documentsURL.appendingPathComponent(
+            "protocols",
+            isDirectory: true
+        )
+        do {
+            try fileManager.createDirectory(
+                at: protocolsURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw ExperimentError.protocolDirectoryUnavailable(error)
+        }
+
+        var availableProtocolURLs = try protocolURLs(in: protocolsURL, using: fileManager)
+        if availableProtocolURLs.isEmpty {
+            guard let sourceExampleURL = bundledExampleURL() else {
+                throw ExperimentError.missingConfiguration
+            }
+            let userExampleURL = protocolsURL.appendingPathComponent(
+                "example.json",
+                isDirectory: false
+            )
+            do {
+                try fileManager.copyItem(at: sourceExampleURL, to: userExampleURL)
+            } catch {
+                throw ExperimentError.couldNotRestoreExample(error)
+            }
+            availableProtocolURLs = [userExampleURL]
+        }
+
+        let candidates = availableProtocolURLs.filter {
             !$0.deletingPathExtension().lastPathComponent.hasPrefix("_")
         }
         var validPlans: [ExperimentPlan] = []
@@ -338,7 +380,7 @@ struct ProtocolCatalog: Sendable {
         validPlans.sort { $0.protocolName.localizedStandardCompare($1.protocolName) == .orderedAscending }
         guard !validPlans.isEmpty else {
             let detail = failures.isEmpty
-                ? "No visible JSON protocol files were found in the Protocols folder."
+                ? "No visible JSON protocol files were found in the Documents/protocols folder."
                 : failures.joined(separator: "\n")
             throw ExperimentError.invalidConfiguration(detail)
         }
@@ -350,17 +392,49 @@ struct ProtocolCatalog: Sendable {
         }
         return .init(plans: validPlans, foveatedRendering: foveatedRendering)
     }
+
+    private static func protocolURLs(in directoryURL: URL, using fileManager: FileManager) throws -> [URL] {
+        let urls: [URL]
+        do {
+            urls = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: []
+            )
+        } catch {
+            throw ExperimentError.protocolDirectoryUnavailable(error)
+        }
+        return urls.filter { url in
+            url.pathExtension.caseInsensitiveCompare("json") == .orderedSame
+                && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
+    }
+
+    private static func bundledExampleURL() -> URL? {
+        Bundle.main.url(forResource: "example", withExtension: "json")
+            ?? Bundle.main.url(
+                forResource: "example",
+                withExtension: "json",
+                subdirectory: "Protocols"
+            )
+    }
 }
 
 enum ExperimentError: LocalizedError {
     case missingConfiguration
+    case protocolDirectoryUnavailable(Error)
+    case couldNotRestoreExample(Error)
     case unreadableConfiguration(Error)
     case invalidConfiguration(String)
 
     var errorDescription: String? {
         switch self {
         case .missingConfiguration:
-            return "No bundled protocol file is available."
+            return "The bundled example protocol is unavailable."
+        case .protocolDirectoryUnavailable(let error):
+            return "The Documents/protocols directory is unavailable: \(error.localizedDescription)"
+        case .couldNotRestoreExample(let error):
+            return "The bundled example protocol couldn't be restored to Documents/protocols: \(error.localizedDescription)"
         case .unreadableConfiguration(let error):
             return "The protocol file couldn't be read: \(error.localizedDescription)"
         case .invalidConfiguration(let message):
