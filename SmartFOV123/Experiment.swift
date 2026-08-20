@@ -116,6 +116,7 @@ extension TaskMode: Decodable {
 struct DisplayConfiguration: Sendable {
     let mode: DisplayMode
     let peakOpacity: Float
+    let passthroughDimming: Double
 }
 
 struct SpeechConfiguration: Sendable {
@@ -334,6 +335,9 @@ struct ExperimentPlan: Sendable {
 }
 
 struct ProtocolCatalog: Sendable {
+    private static let managedExampleName = "example_do_not_edit"
+    private static let legacyExampleName = "example"
+
     let plans: [ExperimentPlan]
     let foveatedRendering: Bool
 
@@ -364,26 +368,25 @@ struct ProtocolCatalog: Sendable {
             throw ExperimentError.protocolDirectoryUnavailable(error)
         }
 
-        var availableProtocolURLs = try protocolURLs(in: protocolsURL, using: fileManager)
-        if availableProtocolURLs.isEmpty {
-            guard let sourceExampleURL = bundledExampleURL() else {
-                throw ExperimentError.missingConfiguration
-            }
-            let userExampleURL = protocolsURL.appendingPathComponent(
-                "example.json",
-                isDirectory: false
-            )
-            do {
-                try fileManager.copyItem(at: sourceExampleURL, to: userExampleURL)
-            } catch {
-                throw ExperimentError.couldNotRestoreExample(error)
-            }
-            availableProtocolURLs = [userExampleURL]
-        }
+        try removeLegacyExample(in: protocolsURL, using: fileManager)
+        let userExampleURL = protocolsURL.appendingPathComponent(
+            "\(managedExampleName).json",
+            isDirectory: false
+        )
+        try installBundledExample(at: userExampleURL, using: fileManager)
+        let availableProtocolURLs = try protocolURLs(in: protocolsURL, using: fileManager)
 
-        let candidates = availableProtocolURLs.filter {
+        let visibleProtocolURLs = availableProtocolURLs.filter {
             !$0.deletingPathExtension().lastPathComponent.hasPrefix("_")
         }
+        let userProtocolURLs = visibleProtocolURLs.filter {
+            $0.deletingPathExtension().lastPathComponent != managedExampleName
+        }
+        let candidates = userProtocolURLs.isEmpty
+            ? visibleProtocolURLs.filter {
+                $0.deletingPathExtension().lastPathComponent == managedExampleName
+            }
+            : userProtocolURLs
         var validPlans: [ExperimentPlan] = []
         var failures: [String] = []
         for url in candidates {
@@ -427,10 +430,50 @@ struct ProtocolCatalog: Sendable {
         }
     }
 
+    private static func removeLegacyExample(
+        in protocolsURL: URL,
+        using fileManager: FileManager
+    ) throws {
+        let legacyURL = protocolsURL.appendingPathComponent("\(legacyExampleName).json")
+        guard fileManager.fileExists(atPath: legacyURL.path) else { return }
+
+        do {
+            try fileManager.removeItem(at: legacyURL)
+        } catch {
+            throw ExperimentError.couldNotRestoreExample(error)
+        }
+    }
+
+    private static func installBundledExample(
+        at destinationURL: URL,
+        using fileManager: FileManager
+    ) throws {
+        guard let sourceURL = bundledExampleURL() else {
+            throw ExperimentError.missingConfiguration
+        }
+
+        let stagedURL = destinationURL.deletingLastPathComponent().appendingPathComponent(
+            "_\(managedExampleName)_restore_\(UUID().uuidString).json"
+        )
+        defer {
+            try? fileManager.removeItem(at: stagedURL)
+        }
+        do {
+            try fileManager.copyItem(at: sourceURL, to: stagedURL)
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.replaceItemAt(destinationURL, withItemAt: stagedURL)
+            } else {
+                try fileManager.moveItem(at: stagedURL, to: destinationURL)
+            }
+        } catch {
+            throw ExperimentError.couldNotRestoreExample(error)
+        }
+    }
+
     private static func bundledExampleURL() -> URL? {
-        Bundle.main.url(forResource: "example", withExtension: "json")
+        Bundle.main.url(forResource: managedExampleName, withExtension: "json")
             ?? Bundle.main.url(
-                forResource: "example",
+                forResource: managedExampleName,
                 withExtension: "json",
                 subdirectory: "Protocols"
             )
@@ -668,6 +711,7 @@ private struct ConditionDefinition: Decodable {
     let blockNumber: Int?
     let repeats: Int?
     let randomSeed: RandomSeedSpecification?
+    let passthroughDimming: Double?
     let digits: DigitPatch?
     let annotation: AnnotationPatch?
     let timer: TimerPatch?
@@ -680,6 +724,7 @@ private struct ConditionDefinition: Decodable {
     private enum CodingKeys: String, CodingKey {
         case repeats
         case randomSeed = "random_seed"
+        case passthroughDimming = "passthrough_dimming"
         case blockNumber = "block_nr"
         case digits, annotation, timer, feedbackSounds = "feedback_sounds", tiles, surround, fov, speech
     }
@@ -690,6 +735,7 @@ private struct ResolvedConditionPatch {
     var blockNumber: Int?
     var repeats: Int?
     var randomSeed: RandomSeedSpecification?
+    var passthroughDimming: Double?
     var digits = ResolvedDigits()
     var annotation = ResolvedAnnotation()
     var timeBar = ResolvedTimeBar()
@@ -705,6 +751,7 @@ private struct ResolvedConditionPatch {
         blockNumber = definition.blockNumber ?? blockNumber
         repeats = definition.repeats ?? repeats
         randomSeed = definition.randomSeed ?? randomSeed
+        passthroughDimming = definition.passthroughDimming ?? passthroughDimming
 
         if let patch = definition.digits {
             digits.heightDegrees = patch.heightDegrees ?? digits.heightDegrees
@@ -1101,6 +1148,7 @@ private enum ConditionResolver {
         guard patch.fov.eye != nil else { try missing("fov.eye") }
         guard patch.fov.mode != nil else { try missing("fov.mode") }
         guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peak_opacity") }
+        guard let passthroughDimming = patch.passthroughDimming else { try missing("passthrough_dimming") }
         guard let fovWidth = patch.fov.widthDegrees else { try missing("fov.width_degrees") }
         guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.height_degrees") }
         guard let fovZoomedWidth = patch.fov.zoomedWidthDegrees else { try missing("fov.zoomed_width_degrees") }
@@ -1179,6 +1227,9 @@ private enum ConditionResolver {
         }
         guard peakOpacity.isFinite, (0...1).contains(peakOpacity) else {
             throw invalid(definitionName, "fov.peak_opacity must be between 0 and 1.")
+        }
+        guard passthroughDimming.isFinite, (0...1).contains(passthroughDimming) else {
+            throw invalid(definitionName, "passthrough_dimming must be between 0 and 1.")
         }
         guard columns >= 4 else {
             throw invalid(definitionName, "tiles.number_horizontal must be at least 4.")
@@ -1375,7 +1426,8 @@ private enum ConditionResolver {
         return ExperimentConfiguration(
             display: .init(
                 mode: patch.fov.mode!,
-                peakOpacity: patch.fov.peakOpacity!
+                peakOpacity: patch.fov.peakOpacity!,
+                passthroughDimming: patch.passthroughDimming!
             ),
             speech: .init(
                 digitAliases: patch.aliases,
@@ -1474,7 +1526,7 @@ private enum JSONShapeValidator {
     ) throws {
             let condition = try dictionary(rawDefinition, path: path)
             var allowed: Set<String> = [
-                "random_seed", "digits", "annotation", "timer", "feedback_sounds", "tiles", "surround", "fov", "speech"
+                "random_seed", "passthrough_dimming", "digits", "annotation", "timer", "feedback_sounds", "tiles", "surround", "fov", "speech"
             ]
             if schedulingFields {
                 allowed.formUnion(["block_nr", "repeats"])

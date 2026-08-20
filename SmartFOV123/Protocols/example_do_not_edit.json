@@ -5,9 +5,10 @@
   "debriefing_title": "Time's up!",
   "debriefing": "Your score is <NUMBER_OF_TARGETS_FOUND>. Well done!\n\nPress the Digital Crown to exit",
   "foveated_rendering": true,
-  "task_mode": "loop_trials_60_seconds",
+  "task_mode": "loop_trials_900_seconds",
   "master_condition_template": {
     "random_seed": "shuffle",
+    "passthrough_dimming": 0,
     "digits": {
       "height_degrees": 0.7,
       "font_name": "Arial",
@@ -114,6 +115,7 @@
         "height_degrees": 14.14
       }
     },
+    
     {
       "repeats": 2,
       "block_nr": 1,
@@ -139,6 +141,127 @@
         "eye": "both",
         "width_degrees": 21.21,
         "height_degrees": 21.21
+      }
+    },
+    
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "fov": {
+        "eye": "right",
+        "zoomed_width_degrees": 21.21,
+        "zoomed_height_degrees": 21.21
+      }
+    },
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "fov": {
+        "eye": "left",
+        "zoomed_width_degrees": 21.21,
+        "zoomed_height_degrees": 21.21
+      }
+    },
+    {
+      "repeats": 3,
+      "block_nr": 1,
+      "fov": {
+        "eye": "both",
+        "zoomed_width_degrees": 21.21,
+        "zoomed_height_degrees": 21.21
+      }
+    },
+    
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "right",
+        "width_degrees": 14.14,
+        "height_degrees": 14.14
+      }
+    },
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "left",
+        "width_degrees": 14.14,
+        "height_degrees": 14.14
+      }
+    },
+    {
+      "repeats": 3,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "both",
+        "width_degrees": 14.14,
+        "height_degrees": 14.14
+      }
+    },
+    
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "right",
+        "width_degrees": 21.21,
+        "height_degrees": 21.21
+      }
+    },
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "left",
+        "width_degrees": 21.21,
+        "height_degrees": 21.21
+      }
+    },
+    {
+      "repeats": 3,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "both",
+        "width_degrees": 21.21,
+        "height_degrees": 21.21
+      }
+    },
+    
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "right",
+        "zoomed_width_degrees": 21.21,
+        "zoomed_height_degrees": 21.21
+      }
+    },
+    {
+      "repeats": 2,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "left",
+        "zoomed_width_degrees": 21.21,
+        "zoomed_height_degrees": 21.21
+      }
+    },
+    {
+      "repeats": 3,
+      "block_nr": 1,
+      "passthrough_dimming": 1.0,
+      "fov": {
+        "eye": "both",
+        "zoomed_width_degrees": 21.21,
+        "zoomed_height_degrees": 21.21
       }
     }
   ]

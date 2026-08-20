@@ -2,14 +2,17 @@ import CompositorServices
 import Metal
 import SwiftUI
 
-struct StimulusCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfiguration {
+struct StimulusCompositorLayer: CompositorContent, CompositorLayerConfiguration {
     let appModel: AppModel
 
-    var body: some ImmersiveSpaceContent {
+    var body: some CompositorContent {
         CompositorLayer(configuration: self) { @MainActor layerRenderer in
             appModel.startWindowlessExperienceIfNeeded()
             Renderer.start(layerRenderer, appModel: appModel)
         }
+        .preferredSurroundingsEffect(
+            appModel.passthroughDimming.map { SurroundingsEffect.dim(intensity: $0) }
+        )
     }
 
     func makeConfiguration(

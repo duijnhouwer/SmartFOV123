@@ -316,6 +316,7 @@ private struct CompletedTrial: Encodable {
         let conditionNumber: Int
         let blockNumber: Int
         let randomSeed: UInt64
+        let passthroughDimming: Double
         let digits: Digits
         let annotation: Annotation
         let timer: Timer
@@ -331,6 +332,7 @@ private struct CompletedTrial: Encodable {
             conditionNumber = experiment.conditionNumber
             blockNumber = experiment.blockNumber
             randomSeed = experiment.randomSeed
+            passthroughDimming = configuration.display.passthroughDimming
             digits = .init(
                 heightDegrees: stimulus.digitHeightArcmin / 60,
                 fontName: stimulus.digitFontName,
@@ -411,6 +413,7 @@ private struct CompletedTrial: Encodable {
             case conditionNumber = "condition_nr"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
+            case passthroughDimming = "passthrough_dimming"
         }
     }
 
@@ -676,7 +679,7 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_nr") {
             preferredOrder = [
-                "condition_nr", "block_nr", "random_seed", "digits", "annotation", "timer", "feedback_sounds",
+                "condition_nr", "block_nr", "random_seed", "passthrough_dimming", "digits", "annotation", "timer", "feedback_sounds",
                 "tiles", "surround", "fov", "speech"
             ]
         } else if dictionary.keys.contains("metronome") {

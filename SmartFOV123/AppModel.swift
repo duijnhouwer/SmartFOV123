@@ -52,6 +52,7 @@ final class AppModel {
     private(set) var completedTargetCount = 0
     private(set) var subjectNumber: String?
     private(set) var trialPhase: TrialPhase = .participantNumber
+    private var configuredPassthroughDimming: Double = 0
     var immersiveSpaceState: ImmersiveSpaceState = .closed
     var statusMessage: String?
 
@@ -74,6 +75,16 @@ final class AppModel {
 
     var experiment: Experiment? {
         instantiatedExperiment
+    }
+
+    var passthroughDimming: Double? {
+        switch trialPhase {
+        case .transitioning, .targetCue, .search:
+            return configuredPassthroughDimming > 0 ? configuredPassthroughDimming : nil
+        case .configurationError, .protocolSelection, .participantNumber,
+             .participantConfirmation, .instructions, .debriefing:
+            return nil
+        }
     }
 
     var trialCount: Int {
@@ -165,6 +176,9 @@ final class AppModel {
         instantiatedExperiment = await Task.detached(priority: .userInitiated) {
             scheduledTrial.instantiate(trialNumber: trialNumber)
         }.value
+        if let instantiatedExperiment {
+            configuredPassthroughDimming = instantiatedExperiment.configuration.display.passthroughDimming
+        }
         if hasCompletedExperiment {
             instantiatedExperiment = nil
             return true
