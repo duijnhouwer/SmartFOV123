@@ -12,26 +12,38 @@ final class FeedbackSoundPlayer {
         var correctPlayer: AVAudioPlayer?
         var wrongPlayer: AVAudioPlayer?
         var popPlayer: AVAudioPlayer?
-        var isPrepared = false
+        var configurationKey: String?
     }
 
     private let audioQueue = DispatchQueue(label: "SmartFOV123.FeedbackAudio")
     private let audioState = AudioState()
 
-    func prepare() async {
+    func prepare(configuration: StimulusConfiguration) async {
         let audioState = audioState
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             audioQueue.async {
                 defer { continuation.resume() }
-                guard !audioState.isPrepared else { return }
+                let configurationKey = [
+                    configuration.correctFeedbackFile,
+                    String(configuration.correctFeedbackVolume),
+                    configuration.wrongFeedbackFile,
+                    String(configuration.wrongFeedbackVolume)
+                ].joined(separator: "|")
+                guard audioState.configurationKey != configurationKey else { return }
 
                 // The session-level setting is a fallback for visionOS versions before
                 // per-player spatial experiences became available.
                 Self.configureHeadLockedAudio()
-                audioState.correctPlayer = Self.loadPlayer(named: "correct")
-                audioState.wrongPlayer = Self.loadPlayer(named: "wrong")
-                audioState.popPlayer = Self.loadPlayer(named: "pop")
-                audioState.isPrepared = true
+                audioState.correctPlayer = Self.loadPlayer(file: configuration.correctFeedbackFile)
+                audioState.correctPlayer?.volume = Self.playbackVolume(
+                    for: configuration.correctFeedbackVolume
+                )
+                audioState.wrongPlayer = Self.loadPlayer(file: configuration.wrongFeedbackFile)
+                audioState.wrongPlayer?.volume = Self.playbackVolume(
+                    for: configuration.wrongFeedbackVolume
+                )
+                audioState.popPlayer = audioState.popPlayer ?? Self.loadPlayer(file: "pop.caf")
+                audioState.configurationKey = configurationKey
             }
         }
     }
@@ -79,11 +91,14 @@ final class FeedbackSoundPlayer {
         }
     }
 
-    private static func loadPlayer(named name: String) -> AVAudioPlayer? {
-        let url = Bundle.main.url(forResource: name, withExtension: "caf")
-            ?? Bundle.main.url(forResource: name, withExtension: "caf", subdirectory: "Config")
+    private static func loadPlayer(file: String) -> AVAudioPlayer? {
+        let fileName = file as NSString
+        let name = fileName.deletingPathExtension
+        let fileExtension = fileName.pathExtension.isEmpty ? "caf" : fileName.pathExtension
+        let url = Bundle.main.url(forResource: name, withExtension: fileExtension)
+            ?? Bundle.main.url(forResource: name, withExtension: fileExtension, subdirectory: "Audio")
         guard let url else {
-            print("SmartFOV123 audio error: \(name).caf is missing from the app bundle.")
+            print("SmartFOV123 audio error: \(file) is missing from the app bundle.")
             return nil
         }
 
@@ -99,10 +114,15 @@ final class FeedbackSoundPlayer {
             return player
         } catch {
             print(
-                "SmartFOV123 audio error: couldn't load \(name).caf "
+                "SmartFOV123 audio error: couldn't load \(file) "
                     + "(\(error.localizedDescription))."
             )
             return nil
         }
+    }
+
+    private static func playbackVolume(for configuredVolume: Float) -> Float {
+        let clamped = min(max(configuredVolume, 0), 1)
+        return clamped * clamped
     }
 }

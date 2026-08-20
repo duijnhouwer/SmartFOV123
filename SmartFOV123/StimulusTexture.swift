@@ -229,13 +229,10 @@ struct StimulusTexture {
                 named: config.digitFontName,
                 capHeight: desiredDigitCapHeight
             )
-            let boldDigitFont = CTFontCreateCopyWithSymbolicTraits(
-                digitFont,
-                0,
-                nil,
-                .traitBold,
-                .traitBold
-            ) ?? digitFont
+            let highlightDigitFont = try Self.font(
+                named: config.digitHighlightFontName,
+                capHeight: desiredDigitCapHeight
+            )
             let annotationFont = try Self.font(
                 named: config.annotationFontName,
                 capHeight: desiredAnnotationCapHeight
@@ -245,10 +242,10 @@ struct StimulusTexture {
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
                     config.digitRGB.cgColor
             ]
-            let boldDigitAttributes: [NSAttributedString.Key: Any] = [
-                NSAttributedString.Key(kCTFontAttributeName as String): boldDigitFont,
+            let highlightDigitAttributes: [NSAttributedString.Key: Any] = [
+                NSAttributedString.Key(kCTFontAttributeName as String): highlightDigitFont,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
-                    config.digitRGB.cgColor
+                    config.digitHighlightRGB.cgColor
             ]
             let annotationAttributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): annotationFont,
@@ -305,7 +302,7 @@ struct StimulusTexture {
                     glyph,
                     centeredAt: center,
                     attributes: highlightedIndices.contains(index)
-                        ? boldDigitAttributes
+                        ? highlightDigitAttributes
                         : digitAttributes,
                     in: context
                 )

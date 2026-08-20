@@ -146,6 +146,8 @@ struct StimulusConfiguration: Sendable {
     let digitFontName: String
     let digitRGB: RGB
     let digitRandomMethod: DigitRandomMethod
+    let digitHighlightRGB: RGB
+    let digitHighlightFontName: String
 
     let annotationHeightArcmin: Float
     let annotationFontName: String
@@ -160,7 +162,12 @@ struct StimulusConfiguration: Sendable {
     let metronomeStartSeconds: [Int]
     let metronomeBeatsPerMinute: [Int]
     let metronomeVolume: Float
-    let finalGong: Bool
+    let finalGongVolume: Float
+
+    let correctFeedbackFile: String
+    let correctFeedbackVolume: Float
+    let wrongFeedbackFile: String
+    let wrongFeedbackVolume: Float
 
     let tileWidthArcmin: Float
     let tileHeightArcmin: Float
@@ -257,14 +264,7 @@ struct ExperimentPlan: Sendable {
     let foveatedRendering: Bool
     let trials: [ScheduledTrial]
 
-    static func loadBundled() throws -> ExperimentPlan {
-        guard let url = Bundle.main.url(forResource: "protocol", withExtension: "json") else {
-            throw ExperimentError.missingConfiguration
-        }
-        return try load(from: url)
-    }
-
-    static func load(from url: URL) throws -> ExperimentPlan {
+    static func load(from url: URL, protocolName: String? = nil) throws -> ExperimentPlan {
         let data: Data
         do {
             data = try Data(contentsOf: url)
@@ -289,7 +289,10 @@ struct ExperimentPlan: Sendable {
             throw ExperimentError.invalidConfiguration(error.localizedDescription)
         }
 
-        return try ConditionResolver.makePlan(from: file)
+        return try ConditionResolver.makePlan(
+            from: file,
+            protocolName: protocolName ?? url.deletingPathExtension().lastPathComponent
+        )
     }
 
     private static func describe(_ error: DecodingError) -> String {
@@ -313,6 +316,42 @@ struct ExperimentPlan: Sendable {
     }
 }
 
+struct ProtocolCatalog: Sendable {
+    let plans: [ExperimentPlan]
+    let foveatedRendering: Bool
+
+    static func loadBundled() throws -> ProtocolCatalog {
+        let urls = Bundle.main.urls(forResourcesWithExtension: "json", subdirectory: nil) ?? []
+        let candidates = urls.filter {
+            !$0.deletingPathExtension().lastPathComponent.hasPrefix("_")
+        }
+        var validPlans: [ExperimentPlan] = []
+        var failures: [String] = []
+        for url in candidates {
+            let name = url.deletingPathExtension().lastPathComponent
+            do {
+                validPlans.append(try ExperimentPlan.load(from: url, protocolName: name))
+            } catch {
+                failures.append("\(name): \(error.localizedDescription)")
+            }
+        }
+        validPlans.sort { $0.protocolName.localizedStandardCompare($1.protocolName) == .orderedAscending }
+        guard !validPlans.isEmpty else {
+            let detail = failures.isEmpty
+                ? "No visible JSON protocol files were found in the Protocols folder."
+                : failures.joined(separator: "\n")
+            throw ExperimentError.invalidConfiguration(detail)
+        }
+        let foveationValues = Set(validPlans.map(\.foveatedRendering))
+        guard foveationValues.count == 1, let foveatedRendering = foveationValues.first else {
+            throw ExperimentError.invalidConfiguration(
+                "All visible protocols must use the same foveated_rendering value because compositor configuration is fixed before spoken protocol selection."
+            )
+        }
+        return .init(plans: validPlans, foveatedRendering: foveatedRendering)
+    }
+}
+
 enum ExperimentError: LocalizedError {
     case missingConfiguration
     case unreadableConfiguration(Error)
@@ -321,18 +360,17 @@ enum ExperimentError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingConfiguration:
-            return "The bundled protocol.json file is missing."
+            return "No bundled protocol file is available."
         case .unreadableConfiguration(let error):
-            return "protocol.json couldn't be read: \(error.localizedDescription)"
+            return "The protocol file couldn't be read: \(error.localizedDescription)"
         case .invalidConfiguration(let message):
-            return "protocol.json is invalid: \(message)"
+            return "The protocol configuration is invalid: \(message)"
         }
     }
 }
 
 private struct ExperimentFile: Decodable {
     let schemaVersion: Int
-    let protocolName: String
     let subjectNumberDigitCount: Int
     let instructions: String
     let debriefingTitle: String
@@ -344,7 +382,6 @@ private struct ExperimentFile: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
-        case protocolName = "protocol_name"
         case subjectNumberDigitCount = "subject_number_digit_count"
         case instructions
         case debriefingTitle = "debriefing_title"
@@ -387,12 +424,16 @@ private struct DigitPatch: Decodable {
     let fontName: String?
     let rgb: RGB?
     let randomMethod: DigitRandomMethod?
+    let highlightRGB: RGB?
+    let highlightFont: String?
 
     private enum CodingKeys: String, CodingKey {
         case heightDegrees = "height_degrees"
         case fontName = "font_name"
         case rgb
         case randomMethod = "random_method"
+        case highlightRGB = "highlight_rgb"
+        case highlightFont = "highlight_font"
     }
 }
 
@@ -441,12 +482,22 @@ private struct MetronomePatch: Decodable {
 private struct TimerPatch: Decodable {
     let sausage: TimerSausagePatch?
     let metronome: MetronomePatch?
-    let finalGong: Bool?
+    let finalGongVolume: Float?
 
     private enum CodingKeys: String, CodingKey {
         case sausage, metronome
-        case finalGong = "final_gong"
+        case finalGongVolume = "final_gong_volume"
     }
+}
+
+private struct FeedbackSoundPatch: Decodable {
+    let file: String?
+    let volume: Float?
+}
+
+private struct FeedbackSoundsPatch: Decodable {
+    let correct: FeedbackSoundPatch?
+    let wrong: FeedbackSoundPatch?
 }
 
 private struct TilePatch: Decodable {
@@ -525,6 +576,7 @@ private struct ConditionDefinition: Decodable {
     let digits: DigitPatch?
     let annotation: AnnotationPatch?
     let timer: TimerPatch?
+    let feedbackSounds: FeedbackSoundsPatch?
     let tiles: TilePatch?
     let surround: SurroundPatch?
     let fov: FOVPatch?
@@ -534,7 +586,7 @@ private struct ConditionDefinition: Decodable {
         case repeats
         case randomSeed = "random_seed"
         case blockNumber = "block_nr"
-        case digits, annotation, timer, tiles, surround, fov, speech
+        case digits, annotation, timer, feedbackSounds = "feedback_sounds", tiles, surround, fov, speech
     }
 
 }
@@ -547,6 +599,7 @@ private struct ResolvedConditionPatch {
     var annotation = ResolvedAnnotation()
     var timeBar = ResolvedTimeBar()
     var metronome = ResolvedMetronome()
+    var feedbackSounds = ResolvedFeedbackSounds()
     var tiles = ResolvedTiles()
     var surround = ResolvedSurround()
     var fov = ResolvedFOV()
@@ -563,6 +616,8 @@ private struct ResolvedConditionPatch {
             digits.fontName = patch.fontName ?? digits.fontName
             digits.rgb = patch.rgb ?? digits.rgb
             digits.randomMethod = patch.randomMethod ?? digits.randomMethod
+            digits.highlightRGB = patch.highlightRGB ?? digits.highlightRGB
+            digits.highlightFont = patch.highlightFont ?? digits.highlightFont
         }
         if let patch = definition.annotation {
             annotation.heightDegrees = patch.heightDegrees ?? annotation.heightDegrees
@@ -584,7 +639,16 @@ private struct ResolvedConditionPatch {
             metronome.beatsPerMinute = patch.beatsPerMinute ?? metronome.beatsPerMinute
             metronome.volume = patch.volume ?? metronome.volume
         }
-        metronome.finalGong = definition.timer?.finalGong ?? metronome.finalGong
+        metronome.finalGongVolume = definition.timer?.finalGongVolume
+            ?? metronome.finalGongVolume
+        if let patch = definition.feedbackSounds?.correct {
+            feedbackSounds.correctFile = patch.file ?? feedbackSounds.correctFile
+            feedbackSounds.correctVolume = patch.volume ?? feedbackSounds.correctVolume
+        }
+        if let patch = definition.feedbackSounds?.wrong {
+            feedbackSounds.wrongFile = patch.file ?? feedbackSounds.wrongFile
+            feedbackSounds.wrongVolume = patch.volume ?? feedbackSounds.wrongVolume
+        }
         if let patch = definition.tiles {
             tiles.widthDegrees = patch.widthDegrees ?? tiles.widthDegrees
             tiles.heightDegrees = patch.heightDegrees ?? tiles.heightDegrees
@@ -626,6 +690,8 @@ private struct ResolvedDigits {
     var fontName: String?
     var rgb: RGB?
     var randomMethod: DigitRandomMethod?
+    var highlightRGB: RGB?
+    var highlightFont: String?
 }
 
 private struct ResolvedAnnotation {
@@ -647,7 +713,14 @@ private struct ResolvedMetronome {
     var startSeconds: [Int]?
     var beatsPerMinute: [Int]?
     var volume: Float?
-    var finalGong: Bool?
+    var finalGongVolume: Float?
+}
+
+private struct ResolvedFeedbackSounds {
+    var correctFile: String?
+    var correctVolume: Float?
+    var wrongFile: String?
+    var wrongVolume: Float?
 }
 
 private struct ResolvedTiles {
@@ -690,7 +763,7 @@ private struct ExpandedCondition {
 private enum ConditionResolver {
     static let maximumTrialCount = 10_000
 
-    static func makePlan(from file: ExperimentFile) throws -> ExperimentPlan {
+    static func makePlan(from file: ExperimentFile, protocolName: String) throws -> ExperimentPlan {
         guard file.schemaVersion == 6 else {
             throw ExperimentError.invalidConfiguration(
                 "schema_version \(file.schemaVersion) is unsupported; this app requires version 6."
@@ -699,11 +772,8 @@ private enum ConditionResolver {
         guard !file.conditions.isEmpty else {
             throw ExperimentError.invalidConfiguration("conditions must contain at least one condition.")
         }
-        let protocolName = file.protocolName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !protocolName.isEmpty, protocolName == file.protocolName else {
-            throw ExperimentError.invalidConfiguration(
-                "protocol_name must be nonempty and have no leading or trailing whitespace."
-            )
+        guard !protocolName.isEmpty, !protocolName.hasPrefix("_") else {
+            throw ExperimentError.invalidConfiguration("The protocol filename is invalid.")
         }
         guard (1...12).contains(file.subjectNumberDigitCount) else {
             throw ExperimentError.invalidConfiguration(
@@ -861,6 +931,10 @@ private enum ConditionResolver {
         guard let fontName = patch.digits.fontName else { try missing("digits.font_name") }
         guard patch.digits.rgb != nil else { try missing("digits.rgb") }
         guard patch.digits.randomMethod != nil else { try missing("digits.random_method") }
+        guard patch.digits.highlightRGB != nil else { try missing("digits.highlight_rgb") }
+        guard let highlightFont = patch.digits.highlightFont else {
+            try missing("digits.highlight_font")
+        }
         guard let annotationHeight = patch.annotation.heightDegrees else {
             try missing("annotation.height_degrees")
         }
@@ -888,8 +962,20 @@ private enum ConditionResolver {
         guard let metronomeVolume = patch.metronome.volume else {
             try missing("timer.metronome.volume")
         }
-        guard patch.metronome.finalGong != nil else {
-            try missing("timer.final_gong")
+        guard let finalGongVolume = patch.metronome.finalGongVolume else {
+            try missing("timer.final_gong_volume")
+        }
+        guard let correctFeedbackFile = patch.feedbackSounds.correctFile else {
+            try missing("feedback_sounds.correct.file")
+        }
+        guard let correctFeedbackVolume = patch.feedbackSounds.correctVolume else {
+            try missing("feedback_sounds.correct.volume")
+        }
+        guard let wrongFeedbackFile = patch.feedbackSounds.wrongFile else {
+            try missing("feedback_sounds.wrong.file")
+        }
+        guard let wrongFeedbackVolume = patch.feedbackSounds.wrongVolume else {
+            try missing("feedback_sounds.wrong.volume")
         }
         guard let tileWidth = patch.tiles.widthDegrees else { try missing("tiles.width_degrees") }
         guard let tileHeight = patch.tiles.heightDegrees else { try missing("tiles.height_degrees") }
@@ -1032,6 +1118,13 @@ private enum ConditionResolver {
                 "timer.metronome.volume must be finite and between zero and one."
             )
         }
+        for (name, volume) in [
+            ("timer.final_gong_volume", finalGongVolume),
+            ("feedback_sounds.correct.volume", correctFeedbackVolume),
+            ("feedback_sounds.wrong.volume", wrongFeedbackVolume)
+        ] where !volume.isFinite || !(0...1).contains(volume) {
+            throw invalid(definitionName, "\(name) must be finite and between zero and one.")
+        }
         let gridWidth = tileWidth * Float(columns)
             + tileGutter * Float(columns - 1) + surroundInnerMargin * 2
         let gridHeight = tileHeight * Float(rows)
@@ -1073,6 +1166,24 @@ private enum ConditionResolver {
                 definitionName,
                 "digits.font_name ‘\(fontName)’ is not installed on this device."
             )
+        }
+        guard !highlightFont.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw invalid(definitionName, "digits.highlight_font must not be empty.")
+        }
+        guard fontIsAvailable(named: highlightFont) else {
+            throw invalid(
+                definitionName,
+                "digits.highlight_font ‘\(highlightFont)’ is not installed on this device."
+            )
+        }
+        for (name, file) in [
+            ("feedback_sounds.correct.file", correctFeedbackFile),
+            ("feedback_sounds.wrong.file", wrongFeedbackFile)
+        ] {
+            guard !file.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  file == file.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                throw invalid(definitionName, "\(name) must be a nonempty filename without surrounding whitespace.")
+            }
         }
         guard !annotationFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw invalid(definitionName, "annotation.font_name must not be empty.")
@@ -1166,6 +1277,8 @@ private enum ConditionResolver {
                 digitFontName: patch.digits.fontName!,
                 digitRGB: patch.digits.rgb!,
                 digitRandomMethod: patch.digits.randomMethod!,
+                digitHighlightRGB: patch.digits.highlightRGB!,
+                digitHighlightFontName: patch.digits.highlightFont!,
                 annotationHeightArcmin: patch.annotation.heightDegrees! * 60,
                 annotationFontName: patch.annotation.fontName!,
                 annotationFontRGB: patch.annotation.fontRGB!,
@@ -1178,7 +1291,11 @@ private enum ConditionResolver {
                 metronomeStartSeconds: patch.metronome.startSeconds!,
                 metronomeBeatsPerMinute: patch.metronome.beatsPerMinute!,
                 metronomeVolume: patch.metronome.volume!,
-                finalGong: patch.metronome.finalGong!,
+                finalGongVolume: patch.metronome.finalGongVolume!,
+                correctFeedbackFile: patch.feedbackSounds.correctFile!,
+                correctFeedbackVolume: patch.feedbackSounds.correctVolume!,
+                wrongFeedbackFile: patch.feedbackSounds.wrongFile!,
+                wrongFeedbackVolume: patch.feedbackSounds.wrongVolume!,
                 tileWidthArcmin: patch.tiles.widthDegrees! * 60,
                 tileHeightArcmin: patch.tiles.heightDegrees! * 60,
                 tileGutterArcmin: patch.tiles.gutterDegrees! * 60,
@@ -1218,7 +1335,7 @@ private enum JSONShapeValidator {
         try keys(
             root,
             allowed: [
-                "schema_version", "protocol_name", "subject_number_digit_count",
+                "schema_version", "subject_number_digit_count",
                 "instructions", "debriefing_title", "debriefing", "foveated_rendering", "task_mode",
                 "master_condition_template", "conditions"
             ],
@@ -1244,7 +1361,7 @@ private enum JSONShapeValidator {
     ) throws {
             let condition = try dictionary(rawDefinition, path: path)
             var allowed: Set<String> = [
-                "random_seed", "digits", "annotation", "timer", "tiles", "surround", "fov", "speech"
+                "random_seed", "digits", "annotation", "timer", "feedback_sounds", "tiles", "surround", "fov", "speech"
             ]
             if schedulingFields {
                 allowed.formUnion(["block_nr", "repeats"])
@@ -1253,14 +1370,14 @@ private enum JSONShapeValidator {
             try section(
                 condition["digits"],
                 path: "\(path).digits",
-                allowed: ["height_degrees", "font_name", "rgb", "random_method"]
+                allowed: ["height_degrees", "font_name", "rgb", "random_method", "highlight_rgb", "highlight_font"]
             )
             try section(
                 condition["annotation"],
                 path: "\(path).annotation",
                 allowed: ["height_degrees", "font_name", "font_rgb"]
             )
-            try section(condition["timer"], path: "\(path).timer", allowed: ["sausage", "metronome", "final_gong"])
+            try section(condition["timer"], path: "\(path).timer", allowed: ["sausage", "metronome", "final_gong_volume"])
             if let rawTimer = condition["timer"] {
                 let timer = try dictionary(rawTimer, path: "\(path).timer")
                 try section(
@@ -1273,6 +1390,12 @@ private enum JSONShapeValidator {
                     path: "\(path).timer.metronome",
                     allowed: ["start_seconds", "beats_per_minute", "volume"]
                 )
+            }
+            try section(condition["feedback_sounds"], path: "\(path).feedback_sounds", allowed: ["correct", "wrong"])
+            if let rawFeedback = condition["feedback_sounds"] {
+                let feedback = try dictionary(rawFeedback, path: "\(path).feedback_sounds")
+                try section(feedback["correct"], path: "\(path).feedback_sounds.correct", allowed: ["file", "volume"])
+                try section(feedback["wrong"], path: "\(path).feedback_sounds.wrong", allowed: ["file", "volume"])
             }
             try section(
                 condition["tiles"],

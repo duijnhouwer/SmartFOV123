@@ -1,6 +1,5 @@
 {
   "schema_version": 6,
-  "protocol_name": "example",
   "subject_number_digit_count": 3,
   "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nNumbers must be spoken one digit at time.\n\nThe next target appears automatically after a correct response.\n\nFind as many targets as possible before the <TIMER_SECONDS>-second timer runs out.",
   "debriefing_title": "Time's up!",
@@ -13,7 +12,9 @@
       "height_degrees": 0.7,
       "font_name": "Arial",
       "rgb": [0, 0, 0],
-      "random_method": "flat_distribution"
+      "random_method": "flat_distribution",
+      "highlight_rgb": [1, 0, 0],
+      "highlight_font": "Arial Bold"
     },
     "fov": {
       "eye": "right",
@@ -48,23 +49,27 @@
       "font_rgb": [0, 0, 0]
     },
     "timer": {
-      "sausage": {
-        "fill_rgb": [1, 1, 1],
-        "height_degrees": 0.5,
-        "corner_radius_degrees": 0.25,
-        "back_rgb": [0, 0, 0],
-        "back_height_degrees": 1.0,
-        "back_corner_radius_degrees": 0.5
-      },
-      "metronome": {
-        "start_seconds": [0, 30, 60, 90, 120, 150, 180, 210, 240, 270],
-        "beats_per_minute": [60, 66, 72, 80, 88, 98, 110, 124, 140, 160],
-        "volume": 0.25
-      },
-      "final_gong": true
+        "sausage": {
+            "fill_rgb": [1, 1, 1],
+            "height_degrees": 0.5,
+            "corner_radius_degrees": 0.25,
+            "back_rgb": [0, 0, 0],
+            "back_height_degrees": 1.0,
+            "back_corner_radius_degrees": 0.5
+        },
+        "metronome": {
+            "start_seconds": [0, 30, 60, 90, 120, 150, 180, 210, 240, 270],
+            "beats_per_minute": [60, 66, 72, 80, 88, 98, 110, 124, 140, 160],
+            "volume": 0.25
+        },
+        "final_gong_volume": 0.5
+    },
+    "feedback_sounds": {
+        "correct": { "file": "correct.caf", "volume": 0.5 },
+        "wrong": { "file": "wrong.caf", "volume": 0.5 }
     },
     "speech": {
-      "reset_seconds": 2,
+      "reset_seconds": 1.5,
       "aliases": {
         "0": ["zero", "oh", "o"],
         "1": ["one", "won"],

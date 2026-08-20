@@ -14,6 +14,7 @@ final class AppModel {
 
     enum TrialPhase: Equatable {
         case configurationError
+        case protocolSelection
         case participantNumber
         case participantConfirmation
         case instructions
@@ -24,7 +25,9 @@ final class AppModel {
     }
 
     let immersiveSpaceID = "SmartFOV123Space"
-    let plan: ExperimentPlan?
+    private let availablePlans: [ExperimentPlan]
+    let foveatedRendering: Bool
+    private(set) var plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
     private let metronomePlayer = MetronomePlayer()
@@ -35,7 +38,7 @@ final class AppModel {
     private var speechPartialResetTask: Task<Void, Never>?
     private var backgroundObserverTask: Task<Void, Never>?
     private var timedSessionTask: Task<Void, Never>?
-    private var timedSessionUsesFinalGong = false
+    private var timedSessionFinalGongVolume: Float = 0
     private var instantiatedExperiment: Experiment?
     private var preparedTrialRevision: Int?
     private var currentTrialMeasurement: InProgressTrialMeasurement?
@@ -54,8 +57,14 @@ final class AppModel {
 
     init() {
         do {
-            plan = try ExperimentPlan.loadBundled()
+            let catalog = try ProtocolCatalog.loadBundled()
+            availablePlans = catalog.plans
+            foveatedRendering = catalog.foveatedRendering
+            plan = catalog.plans.count == 1 ? catalog.plans[0] : nil
+            trialPhase = plan == nil ? .protocolSelection : .participantNumber
         } catch {
+            availablePlans = []
+            foveatedRendering = true
             plan = nil
             trialPhase = .configurationError
             statusMessage = error.localizedDescription
@@ -88,6 +97,15 @@ final class AppModel {
                 title: "Configuration Error",
                 message: "\(statusMessage ?? "The experiment configuration is invalid.")\n\nPress the Digital Crown to leave SmartFOV123.",
                 usesLeadingAlignment: false
+            )
+        case .protocolSelection:
+            let names = availablePlans.enumerated().map {
+                "\($0.offset + 1). \($0.element.protocolName)"
+            }.joined(separator: "\n")
+            return .init(
+                title: "SmartFOV123",
+                message: "\(names)\n\nSpeak number of protocol to run",
+                usesLeadingAlignment: true
             )
         case .participantNumber:
             let digitCount = plan?.subjectNumberDigitCount ?? 3
@@ -163,8 +181,11 @@ final class AppModel {
     }
 
     func prepareImmersivePresentation() {
-        if plan == nil {
+        if plan == nil, availablePlans.isEmpty {
             trialPhase = .configurationError
+            stimulusPresentationState.hide()
+        } else if plan == nil {
+            trialPhase = .protocolSelection
             stimulusPresentationState.hide()
         } else if hasCompletedExperiment {
             trialPhase = .debriefing
@@ -284,8 +305,9 @@ final class AppModel {
                     self?.handleRecognitionEnded(error)
                 }
             )
-            startTimedSessionIfNeeded()
             switch trialPhase {
+            case .protocolSelection:
+                statusMessage = "Listening for a protocol number."
             case .participantNumber:
                 let digitCount = plan?.subjectNumberDigitCount ?? 3
                 statusMessage = "Listening for the \(digitCount)-digit participant number."
@@ -302,7 +324,9 @@ final class AppModel {
             case .search:
                 statusMessage = "Listening… find the target, then read the three crossing digits."
             }
-            await feedbackSoundPlayer.prepare()
+            if let stimulus = instantiatedExperiment?.configuration.stimulus {
+                await feedbackSoundPlayer.prepare(configuration: stimulus)
+            }
         } catch {
             if error is CancellationError {
                 return
@@ -325,9 +349,13 @@ final class AppModel {
     private func handleTranscript(_ transcript: String) {
         guard immersiveSpaceState == .open else { return }
 
+        if trialPhase == .protocolSelection {
+            handleProtocolSelection(transcript)
+            return
+        }
         guard let experiment else { return }
         switch trialPhase {
-        case .configurationError, .debriefing, .transitioning:
+        case .configurationError, .protocolSelection, .debriefing, .transitioning:
             return
         case .participantNumber:
             handleParticipantNumber(transcript, experiment: experiment)
@@ -374,7 +402,10 @@ final class AppModel {
         if candidate == experiment.grid.targetNumber {
             if trialPhase == .targetCue {
                 trialPhase = .search
-                currentTrialMeasurement?.digitRevealMS = elapsedMilliseconds()
+                let targetReadMS = elapsedMilliseconds()
+                currentTrialMeasurement?.digitRevealMS = targetReadMS
+                resultFileWriter.markFirstTargetRead(atMS: targetReadMS)
+                startTimedSessionIfNeeded()
                 stimulusPresentationState.revealGrid()
                 feedbackSoundPlayer.playPop()
                 statusMessage = "Target confirmed. Find it, then read the three crossing digits."
@@ -436,6 +467,13 @@ final class AppModel {
             trialPhase = .debriefing
             stimulusPresentationState.hide()
             synchronizeParticipantPresentation()
+            do {
+                try resultFileWriter.finishFixedExperiment(endTimeMS: elapsedMilliseconds())
+            } catch {
+                statusMessage = "Experiment complete, but the result couldn't be saved: \(error.localizedDescription)"
+                print("SmartFOV123 result error: \(error.localizedDescription)")
+                return
+            }
             if let fileURL = resultFileWriter.fileURL {
                 statusMessage = "Experiment complete — all \(trialCount) trials finished. Results: Results/\(fileURL.lastPathComponent)"
             } else {
@@ -458,6 +496,8 @@ final class AppModel {
         guard trialPhase != .configurationError, trialPhase != .debriefing else { return }
         if let error {
             statusMessage = "Speech recognition paused: \(error.localizedDescription) Retrying…"
+        } else if trialPhase == .protocolSelection {
+            statusMessage = "I didn't catch a protocol number. Listening again…"
         } else if trialPhase == .participantConfirmation {
             statusMessage = "I didn't catch yes or no. Listening again…"
         } else if trialPhase == .instructions {
@@ -518,6 +558,49 @@ final class AppModel {
         speechListener.stop()
         scheduleSpeechRestart(afterNanoseconds: 250_000_000)
     }
+
+    private func handleProtocolSelection(_ transcript: String) {
+        guard let selection = Self.spokenProtocolNumber(transcript),
+              availablePlans.indices.contains(selection - 1) else { return }
+        let selected = availablePlans[selection - 1]
+
+        plan = selected
+        statusMessage = "Selected protocol \(selected.protocolName)."
+        speechListener.stop()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard await self.prepareCurrentTrial() else {
+                self.showConfigurationError("The selected protocol has no scheduled trial.")
+                return
+            }
+            self.trialPhase = .participantNumber
+            self.synchronizeParticipantPresentation()
+            await self.startSpeechConfirmation()
+        }
+    }
+
+    private static func normalizedProtocolSelection(_ value: String) -> String {
+        value.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .filter { $0 != "protocol" && $0 != "number" }
+            .joined(separator: " ")
+    }
+
+    private static func spokenProtocolNumber(_ transcript: String) -> Int? {
+        let normalized = normalizedProtocolSelection(transcript)
+        if let number = Int(normalized) {
+            return number
+        }
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.numberStyle = .spellOut
+        return availableSpokenNumberRange.first { number in
+            guard let words = formatter.string(from: NSNumber(value: number)) else { return false }
+            return normalizedProtocolSelection(words) == normalized
+        }
+    }
+
+    private static let availableSpokenNumberRange = 1...999
 
     private func handleParticipantConfirmation(_ transcript: String) {
         let words = transcript
@@ -634,7 +717,7 @@ final class AppModel {
         let durationNanoseconds = UInt64(seconds) * 1_000_000_000
         stimulusPresentationState.startTimeBar(durationSeconds: seconds)
         if let stimulus = instantiatedExperiment?.configuration.stimulus {
-            timedSessionUsesFinalGong = stimulus.finalGong
+            timedSessionFinalGongVolume = stimulus.finalGongVolume
             metronomePlayer.start(
                 startSeconds: stimulus.metronomeStartSeconds,
                 beatsPerMinute: stimulus.metronomeBeatsPerMinute,
@@ -674,10 +757,10 @@ final class AppModel {
             print("SmartFOV123 result error: \(error.localizedDescription)")
         }
         synchronizeParticipantPresentation()
-        if timedSessionUsesFinalGong {
-            metronomePlayer.playGong()
+        if timedSessionFinalGongVolume > 0 {
+            metronomePlayer.playGong(volume: timedSessionFinalGongVolume)
         }
-        timedSessionUsesFinalGong = false
+        timedSessionFinalGongVolume = 0
     }
 
     /// The Digital Crown returns the windowless experience to Home View,
@@ -688,6 +771,11 @@ final class AppModel {
         timedSessionTask?.cancel()
         speechRestartTask?.cancel()
         stimulusPresentationState.hide()
+        do {
+            try resultFileWriter.finishInterruptedExperiment(endTimeMS: elapsedMilliseconds())
+        } catch {
+            print("SmartFOV123 result error during exit: \(error.localizedDescription)")
+        }
         exit(EXIT_SUCCESS)
     }
 

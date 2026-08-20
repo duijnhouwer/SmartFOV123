@@ -18,7 +18,7 @@ struct StimulusCompositorLayer: ImmersiveSpaceContent, CompositorLayerConfigurat
     ) {
         // Request foveation by default. A protocol can explicitly disable it
         // with foveated_rendering: false.
-        let foveationEnabled = appModel.plan?.foveatedRendering != false
+        let foveationEnabled = appModel.foveatedRendering
             && capabilities.supportsFoveation
         configuration.isFoveationEnabled = foveationEnabled
 

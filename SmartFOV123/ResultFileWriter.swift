@@ -6,6 +6,8 @@ final class ResultFileWriter {
     private(set) var fileURL: URL?
     private var completedTrials: [CompletedTrial] = []
     private var experimentMetadata: ResultExperiment?
+    private var firstTargetReadMS: UInt64?
+    private var isFinalized = false
     private let documentsURLOverride: URL?
     private let now: () -> Date
 
@@ -30,25 +32,26 @@ final class ResultFileWriter {
             taskMode: taskMode,
             startDate: startDate
         )
+        completedTrials = []
+        firstTargetReadMS = nil
+        fileURL = nil
+        isFinalized = false
     }
 
     func appendCompletedTrial(
         _ experiment: Experiment,
         results: CompletedTrialResults
     ) throws {
-        let fileURL = try sessionFileURL()
-        let trial = CompletedTrial(experiment: experiment, results: results)
-        guard let experimentMetadata else {
+        guard experimentMetadata != nil else {
             throw ResultFileError.experimentMetadataMissing
         }
-        let document = ResultDocument(
-            experiment: experimentMetadata,
-            trials: completedTrials + [trial],
-            summary: nil
-        )
-        try write(document, to: fileURL)
+        completedTrials.append(CompletedTrial(experiment: experiment, results: results))
+    }
 
-        completedTrials.append(trial)
+    func markFirstTargetRead(atMS milliseconds: UInt64) {
+        if firstTargetReadMS == nil {
+            firstTargetReadMS = milliseconds
+        }
     }
 
     func finishTimedExperiment(
@@ -56,22 +59,41 @@ final class ResultFileWriter {
         durationSeconds: Int,
         endTimeMS: UInt64
     ) throws {
-        let fileURL = try sessionFileURL()
+        try finish(
+            endTimeMS: endTimeMS,
+            summary: .init(
+                score: score,
+                durationSeconds: durationSeconds,
+                endTimeMS: endTimeMS
+            )
+        )
+    }
+
+    func finishFixedExperiment(endTimeMS: UInt64) throws {
+        try finish(endTimeMS: endTimeMS, summary: nil)
+    }
+
+    func finishInterruptedExperiment(endTimeMS: UInt64) throws {
+        try finish(endTimeMS: endTimeMS, summary: nil)
+    }
+
+    private func finish(endTimeMS: UInt64, summary: ResultSummary?) throws {
+        guard !isFinalized else { return }
+        guard let firstTargetReadMS else { return }
         guard let experimentMetadata else {
             throw ResultFileError.experimentMetadataMissing
         }
+        let durationSeconds = Int(endTimeMS.saturatingSubtract(firstTargetReadMS) / 1_000)
+        let outputURL = try sessionFileURL(durationSeconds: durationSeconds)
         try write(
-            ResultDocument(
+            .init(
                 experiment: experimentMetadata,
                 trials: completedTrials,
-                summary: .init(
-                    score: score,
-                    durationSeconds: durationSeconds,
-                    endTimeMS: endTimeMS
-                )
+                summary: summary
             ),
-            to: fileURL
+            to: outputURL
         )
+        isFinalized = true
     }
 
     private func write(_ document: ResultDocument, to fileURL: URL) throws {
@@ -89,7 +111,7 @@ final class ResultFileWriter {
         }
     }
 
-    private func sessionFileURL() throws -> URL {
+    private func sessionFileURL(durationSeconds: Int) throws -> URL {
         if let fileURL {
             return fileURL
         }
@@ -134,7 +156,7 @@ final class ResultFileWriter {
         formatter.dateFormat = "yyyyMMdd_HHmmss"
 
         let candidateURL = resultsDirectoryURL.appendingPathComponent(
-            "result_\(experimentMetadata.subjectNumber)_\(formatter.string(from: experimentMetadata.timestamp)).json",
+            "\(Self.filenameComponent(experimentMetadata.protocolName))_p\(Self.filenameComponent(experimentMetadata.subjectNumber))_\(formatter.string(from: experimentMetadata.timestamp))_\(durationSeconds)s.json",
             isDirectory: false
         )
         guard !fileManager.fileExists(atPath: candidateURL.path) else {
@@ -144,6 +166,18 @@ final class ResultFileWriter {
         fileURL = candidateURL
         print("SmartFOV123 results file: \(candidateURL.path)")
         return candidateURL
+    }
+
+    private static func filenameComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+            .reduce(into: "") { $0.append($1) }
+    }
+}
+
+private extension UInt64 {
+    func saturatingSubtract(_ other: UInt64) -> UInt64 {
+        self >= other ? self - other : 0
     }
 }
 
@@ -285,6 +319,7 @@ private struct CompletedTrial: Encodable {
         let digits: Digits
         let annotation: Annotation
         let timer: Timer
+        let feedbackSounds: FeedbackSounds
         let tiles: Tiles
         let surround: Surround
         let fov: FOV
@@ -300,7 +335,9 @@ private struct CompletedTrial: Encodable {
                 heightDegrees: stimulus.digitHeightArcmin / 60,
                 fontName: stimulus.digitFontName,
                 rgb: stimulus.digitRGB.array,
-                randomMethod: stimulus.digitRandomMethod.rawValue
+                randomMethod: stimulus.digitRandomMethod.rawValue,
+                highlightRGB: stimulus.digitHighlightRGB.array,
+                highlightFont: stimulus.digitHighlightFontName
             )
             annotation = .init(
                 heightDegrees: stimulus.annotationHeightArcmin / 60,
@@ -321,7 +358,17 @@ private struct CompletedTrial: Encodable {
                     beatsPerMinute: stimulus.metronomeBeatsPerMinute,
                     volume: stimulus.metronomeVolume
                 ),
-                finalGong: stimulus.finalGong
+                finalGongVolume: stimulus.finalGongVolume
+            )
+            feedbackSounds = .init(
+                correct: .init(
+                    file: stimulus.correctFeedbackFile,
+                    volume: stimulus.correctFeedbackVolume
+                ),
+                wrong: .init(
+                    file: stimulus.wrongFeedbackFile,
+                    volume: stimulus.wrongFeedbackVolume
+                )
             )
             tiles = .init(
                 widthDegrees: stimulus.tileWidthArcmin / 60,
@@ -358,6 +405,7 @@ private struct CompletedTrial: Encodable {
 
         private enum CodingKeys: String, CodingKey {
             case digits, annotation, timer, tiles, surround, fov, speech
+            case feedbackSounds = "feedback_sounds"
             case conditionNumber = "condition_nr"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
@@ -369,12 +417,16 @@ private struct CompletedTrial: Encodable {
         let fontName: String
         let rgb: [Float]
         let randomMethod: String
+        let highlightRGB: [Float]
+        let highlightFont: String
 
         private enum CodingKeys: String, CodingKey {
             case rgb
             case heightDegrees = "height_degrees"
             case fontName = "font_name"
             case randomMethod = "random_method"
+            case highlightRGB = "highlight_rgb"
+            case highlightFont = "highlight_font"
         }
     }
 
@@ -411,12 +463,22 @@ private struct CompletedTrial: Encodable {
     struct Timer: Encodable {
         let sausage: TimerSausage
         let metronome: Metronome
-        let finalGong: Bool
+        let finalGongVolume: Float
 
         private enum CodingKeys: String, CodingKey {
             case sausage, metronome
-            case finalGong = "final_gong"
+            case finalGongVolume = "final_gong_volume"
         }
+    }
+
+    struct FeedbackSound: Encodable {
+        let file: String
+        let volume: Float
+    }
+
+    struct FeedbackSounds: Encodable {
+        let correct: FeedbackSound
+        let wrong: FeedbackSound
     }
 
     struct Metronome: Encodable {
@@ -608,11 +670,11 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_nr") {
             preferredOrder = [
-                "condition_nr", "block_nr", "random_seed", "digits", "annotation", "timer",
+                "condition_nr", "block_nr", "random_seed", "digits", "annotation", "timer", "feedback_sounds",
                 "tiles", "surround", "fov", "speech"
             ]
         } else if dictionary.keys.contains("metronome") {
-            preferredOrder = ["sausage", "metronome", "final_gong"]
+            preferredOrder = ["sausage", "metronome", "final_gong_volume"]
         } else if dictionary.keys.contains("beats_per_minute") {
             preferredOrder = ["start_seconds", "beats_per_minute", "volume"]
         } else if dictionary.keys.contains("target_number") {
@@ -627,7 +689,7 @@ private enum JSONPrettyPrinter {
                 "back_height_degrees", "back_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("font_name") {
-            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method"]
+            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method", "highlight_rgb", "highlight_font"]
         } else if dictionary.keys.contains("number_horizontal") {
             preferredOrder = [
                 "width_degrees", "height_degrees", "gutter_degrees", "corner_radius_degrees",

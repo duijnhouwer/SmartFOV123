@@ -55,9 +55,10 @@ final class MetronomePlayer {
         }
     }
 
-    func playGong() {
+    func playGong(volume: Float) {
         let audioState = audioState
         audioQueue.async {
+            audioState.gongPlayer?.volume = Self.playbackVolume(for: volume)
             audioState.gongPlayer?.currentTime = 0
             if audioState.gongPlayer?.play() != true {
                 print("SmartFOV123 audio error: gong playback couldn't start.")
@@ -144,7 +145,7 @@ final class MetronomePlayer {
 
     private static func loadPlayer(named name: String) -> AVAudioPlayer? {
         let url = Bundle.main.url(forResource: name, withExtension: "caf")
-            ?? Bundle.main.url(forResource: name, withExtension: "caf", subdirectory: "Config")
+            ?? Bundle.main.url(forResource: name, withExtension: "caf", subdirectory: "Audio")
         guard let url else {
             print("SmartFOV123 audio error: \(name).caf is missing from the app bundle.")
             return nil
