@@ -233,6 +233,7 @@ actor Renderer {
         _ layerRenderer: LayerRenderer,
         appModel: AppModel
     ) throws {
+        DiagnosticLog.event("render", "Renderer initialization begin; device=\(layerRenderer.device.name) allocatedBytes=\(layerRenderer.device.currentAllocatedSize)")
         self.layerRenderer = layerRenderer
         self.appModel = appModel
         self.experiment = nil
@@ -317,16 +318,19 @@ actor Renderer {
         }
         self.endFrameEvent = endFrameEvent
         #endif
+        DiagnosticLog.event("render", "Renderer initialization complete; allocatedBytes=\(device.currentAllocatedSize)")
     }
 
     @MainActor
     static func start(_ layerRenderer: LayerRenderer, appModel: AppModel) {
+        DiagnosticLog.event("render", "render task launch requested")
         Task(executorPreference: RenderTaskExecutor.shared) {
             do {
                 let renderer = try Renderer(layerRenderer, appModel: appModel)
                 try await renderer.startARSession()
                 await renderer.renderLoop()
             } catch {
+                DiagnosticLog.event("error", "renderer stopped with error: \(error.localizedDescription)")
                 await MainActor.run {
                     appModel.statusMessage = error.localizedDescription
                     appModel.immersiveSpaceState = .open
@@ -336,6 +340,7 @@ actor Renderer {
     }
 
     private func startARSession() async throws {
+        DiagnosticLog.event("tracking", "ARKitSession run requested")
         do {
             try await arSession.run([worldTracking])
         } catch {
@@ -344,6 +349,7 @@ actor Renderer {
 
         for _ in 0..<200 {
             if worldTracking.state == .running {
+                DiagnosticLog.event("tracking", "WorldTrackingProvider running")
                 return
             }
             if worldTracking.state == .stopped {
@@ -364,14 +370,18 @@ actor Renderer {
                 if !hasMarkedRendererRunning {
                     presentationState.markRendererRunning()
                     hasMarkedRendererRunning = true
+                    DiagnosticLog.event("render", "LayerRenderer entered running state")
                 }
                 publishState(.open)
                 autoreleasepool {
                     renderFrame()
                 }
             case .paused:
+                DiagnosticLog.event("render", "LayerRenderer paused; waiting to resume")
                 layerRenderer.waitUntilRunning()
+                DiagnosticLog.event("render", "LayerRenderer wait returned; state=\(String(describing: layerRenderer.state))")
             case .invalidated:
+                DiagnosticLog.event("render", "LayerRenderer invalidated; stopping render loop")
                 arSession.stop()
                 publishState(.closed)
                 return
@@ -395,10 +405,12 @@ actor Renderer {
         if let completion = trialResourceMailbox.takeCompletion() {
             switch completion {
             case .success(let resources):
+                DiagnosticLog.event("render", "resource build completed; revision=\(resources.revision) allocatedBytes=\(layerRenderer.device.currentAllocatedSize)")
                 preparedTrialResources = resources
                 failedTrialRevision = nil
                 presentationState.markTrialReady(revision: resources.revision)
             case .failure(let revision, let message):
+                DiagnosticLog.event("error", "resource build failed; revision=\(revision) message=\(message)")
                 failedTrialRevision = revision
                 presentationState.markTrialReady(revision: revision)
                 Task { @MainActor in
@@ -421,6 +433,7 @@ actor Renderer {
             activeTrialRevision = revision
             preparedTrialResources = nil
             loggedProjectionEyes.removeAll()
+            DiagnosticLog.event("render", "resources activated; revision=\(revision) allocatedBytes=\(layerRenderer.device.currentAllocatedSize)")
         }
 
         guard let request = presentationState.trialRequest,
@@ -433,6 +446,7 @@ actor Renderer {
 
         let device = layerRenderer.device
         let mailbox = trialResourceMailbox
+        DiagnosticLog.event("render", "resource build begin; revision=\(request.revision) trial=\(request.experiment.trialNumber) allocatedBytes=\(device.currentAllocatedSize)")
         Task.detached(priority: .userInitiated) {
             do {
                 guard let textureCommandQueue = device.makeCommandQueue() else {
@@ -481,7 +495,9 @@ actor Renderer {
                     taskMode: request.taskMode
                 )
                 mailbox.finish(.success(resources))
+                DiagnosticLog.event("render", "resource build queued for activation; revision=\(request.revision) allocatedBytes=\(device.currentAllocatedSize)")
             } catch {
+                DiagnosticLog.event("error", "resource construction threw; revision=\(request.revision) error=\(error.localizedDescription)")
                 mailbox.finish(
                     .failure(
                         revision: request.revision,
@@ -504,6 +520,30 @@ actor Renderer {
             return
         }
 
+        // Compositor Services requires timing prediction before the update
+        // phase begins. At this point no frame phase has started, so Apple's
+        // documented render-loop pattern permits abandoning a frame for which
+        // timing is unavailable.
+        guard let timing = frame.predictTiming() else { return }
+
+        frame.startUpdate()
+        frame.endUpdate()
+        LayerRenderer.Clock().wait(until: timing.optimalInputTime)
+
+        // Resolve every fallible prerequisite before starting submission. If
+        // any of these are unavailable, this frame has not entered the
+        // submission phase and can be safely skipped. Once queryDrawables()
+        // returns actual drawables below, there must be no early exit before
+        // their presentation is committed and endSubmission() is called.
+        guard worldTracking.state == .running,
+              let deviceAnchor = worldTracking.queryDeviceAnchor(
+                atTimestamp: timing.presentationTime.timeInterval
+              ) else {
+            publishDeviceTrackingWaitIfNeeded()
+            return
+        }
+        clearDeviceTrackingWaitIfNeeded()
+
         #if !targetEnvironment(simulator)
         residencySetIndex = (residencySetIndex + 1) % Self.maxFramesInFlight
         let reusableFrameSignalValue = residencySetSignalValues[residencySetIndex]
@@ -516,20 +556,17 @@ actor Renderer {
         residencySet.commit()
         #endif
 
-        frame.startUpdate()
-        frame.endUpdate()
-
-        guard let timing = frame.predictTiming() else { return }
-        LayerRenderer.Clock().wait(until: timing.optimalInputTime)
-
-        guard worldTracking.state == .running,
-              let deviceAnchor = worldTracking.queryDeviceAnchor(
-                atTimestamp: timing.presentationTime.timeInterval
-              ) else {
-            publishDeviceTrackingWaitIfNeeded()
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            publishError("Metal couldn't create a frame command buffer.")
             return
         }
-        clearDeviceTrackingWaitIfNeeded()
+        commandBuffer.label = "SmartFOV123 frame"
+
+        // Apple's Compositor Services render-loop contract starts submission
+        // before querying drawables. If no drawable is available, abandon this
+        // frame without calling endSubmission(), matching Apple's sample. A
+        // nonempty result must always proceed through commit/endSubmission.
+        frame.startSubmission()
 
         let drawables: [LayerRenderer.Drawable]
         if #available(visionOS 26.0, *) {
@@ -542,10 +579,13 @@ actor Renderer {
         guard !drawables.isEmpty else { return }
 
         for drawable in drawables {
-            drawable.deviceAnchor = deviceAnchor
+            // The drawable carries the compositor's latest presentation time.
+            // Prefer the anchor for that timestamp, while retaining the
+            // prerequisite anchor above as a safe transient fallback.
+            drawable.deviceAnchor = worldTracking.queryDeviceAnchor(
+                atTimestamp: drawable.frameTiming.presentationTime.timeInterval
+            ) ?? deviceAnchor
         }
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
-        commandBuffer.label = "SmartFOV123 frame"
         let surfaceTexture: MTLTexture?
         let presentationContent = presentationState.content
         let rendersSurface: Bool
@@ -636,7 +676,6 @@ actor Renderer {
             }
         }
 
-        frame.startSubmission()
         for drawable in drawables {
             render(
                 drawable,
@@ -852,12 +891,17 @@ actor Renderer {
     private func publishDeviceTrackingWaitIfNeeded() {
         guard !isWaitingForDeviceTracking else { return }
         isWaitingForDeviceTracking = true
+        DiagnosticLog.event(
+            "tracking",
+            "device anchor unavailable; skipping frame before submission"
+        )
         publishError("Waiting for headset tracking before presenting the trial.")
     }
 
     private func clearDeviceTrackingWaitIfNeeded() {
         guard isWaitingForDeviceTracking else { return }
         isWaitingForDeviceTracking = false
+        DiagnosticLog.event("tracking", "device anchor restored")
         Task { @MainActor in
             if appModel.statusMessage == "Waiting for headset tracking before presenting the trial." {
                 appModel.statusMessage = nil

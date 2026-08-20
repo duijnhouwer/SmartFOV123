@@ -22,6 +22,7 @@ final class MetronomePlayer {
         volume: Float,
         durationSeconds: Int
     ) {
+        DiagnosticLog.event("metronome", "start requested; bpm=\(minimumBeatsPerMinute)-\(maximumBeatsPerMinute) intervalBeats=\(incrementIntervalBeats) volume=\(volume) durationSeconds=\(durationSeconds)")
         let audioState = audioState
         audioQueue.async { [weak self] in
             guard let self else { return }
@@ -41,6 +42,7 @@ final class MetronomePlayer {
                 incrementIntervalBeats: incrementIntervalBeats,
                 durationSeconds: durationSeconds
             )
+            DiagnosticLog.event("metronome", "players ready; generation=\(generation) tempoStages=\(tempos.count)")
             self.scheduleBeat(
                 generation: generation,
                 sessionStart: start,
@@ -56,6 +58,7 @@ final class MetronomePlayer {
     }
 
     func finishSession() {
+        DiagnosticLog.event("metronome", "finish session requested")
         let audioState = audioState
         audioQueue.async {
             audioState.generation &+= 1
@@ -65,6 +68,7 @@ final class MetronomePlayer {
     }
 
     func playGong(volume: Float) {
+        DiagnosticLog.event("metronome", "gong requested; volume=\(volume)")
         let audioState = audioState
         audioQueue.async {
             audioState.gongPlayer?.volume = Self.playbackVolume(for: volume)
@@ -76,6 +80,7 @@ final class MetronomePlayer {
     }
 
     func stop() {
+        DiagnosticLog.event("metronome", "stop requested")
         let audioState = audioState
         audioQueue.async {
             audioState.generation &+= 1

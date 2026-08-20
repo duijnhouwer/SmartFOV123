@@ -59,6 +59,7 @@ final class SpeechConfirmationListener {
     private var sessionID: UUID?
     private var hasInputTap = false
     private var isAudioSessionConfigured = false
+    private var recognitionPassNumber: UInt64 = 0
 
     static func requestAuthorization() async throws {
         async let microphoneGranted = requestMicrophoneAuthorization()
@@ -77,6 +78,9 @@ final class SpeechConfirmationListener {
         onEnded: @escaping (Error?) -> Void
     ) async throws {
         stopRecognitionPass()
+        recognitionPassNumber &+= 1
+        let pass = recognitionPassNumber
+        DiagnosticLog.event("speech", "listener pass \(pass) begin; recognizerAvailable=\(recognizer?.isAvailable ?? false)")
 
         guard let recognizer, recognizer.isAvailable else {
             throw ListenerError.recognizerUnavailable
@@ -98,9 +102,11 @@ final class SpeechConfirmationListener {
         }
 
         if !isAudioSessionConfigured {
+            DiagnosticLog.event("audio", "pass \(pass) activating AVAudioSession")
             do {
                 try await Self.configureAndActivateAudioSession()
                 isAudioSessionConfigured = true
+                DiagnosticLog.event("audio", "pass \(pass) AVAudioSession active")
             } catch {
                 if sessionID == currentSessionID {
                     sessionID = nil
@@ -132,6 +138,7 @@ final class SpeechConfirmationListener {
             }
 
             if result?.isFinal == true || error != nil {
+                DiagnosticLog.event("speech", "listener callback ended; pass=\(pass) final=\(result?.isFinal == true) error=\(error?.localizedDescription ?? "none")")
                 Task { @MainActor [weak self] in
                     guard let self, self.sessionID == currentSessionID else { return }
                     self.finishRecognitionPass()
@@ -144,6 +151,30 @@ final class SpeechConfirmationListener {
 
     func stop() {
         stopRecognitionPass()
+    }
+
+    /// Releases microphone and audio-session resources before visionOS
+    /// suspends the app. Normal trial-to-trial stops intentionally keep the
+    /// audio graph alive, so background cleanup needs a stronger operation.
+    func prepareForBackground() {
+        DiagnosticLog.event("audio", "background audio teardown begin")
+        stopRecognitionPass()
+        stopAudioInput()
+        isAudioSessionConfigured = false
+        Self.audioSessionQueue.async {
+            do {
+                try AVAudioSession.sharedInstance().setActive(
+                    false,
+                    options: .notifyOthersOnDeactivation
+                )
+                DiagnosticLog.event("audio", "background AVAudioSession deactivated")
+            } catch {
+                print(
+                    "SmartFOV123 audio error while entering background: "
+                        + error.localizedDescription
+                )
+            }
+        }
     }
 
     /// Stops routing microphone buffers into speech recognition while leaving
@@ -171,15 +202,20 @@ final class SpeechConfirmationListener {
 
     private func ensureAudioInputIsRunning() throws {
         if let audioEngine {
-            guard !audioEngine.isRunning else { return }
+            guard !audioEngine.isRunning else {
+                DiagnosticLog.event("audio", "reusing running AVAudioEngine")
+                return
+            }
             audioEngine.prepare()
             try audioEngine.start()
+            DiagnosticLog.event("audio", "existing AVAudioEngine restarted")
             return
         }
 
         let audioEngine = AVAudioEngine()
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
+        DiagnosticLog.event("audio", "creating AVAudioEngine; sampleRate=\(format.sampleRate) channels=\(format.channelCount)")
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw ListenerError.microphoneUnavailable
         }
@@ -192,6 +228,7 @@ final class SpeechConfirmationListener {
         self.audioEngine = audioEngine
         audioEngine.prepare()
         try audioEngine.start()
+        DiagnosticLog.event("audio", "new AVAudioEngine started and input tap installed")
     }
 
     private func stopAudioInput() {

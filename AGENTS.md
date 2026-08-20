@@ -17,6 +17,15 @@ This directory is a local mirror of the ChatGPT project “SmartFOV123”.
   to the user on Apple Vision Pro.
 - If compilation is especially important, explain why and ask before running it.
 
+### Reverting experiments
+
+- When rolling back an unsuccessful experiment, first consider restoring the
+  affected files from the known-good Git commit instead of manually reversing
+  each edit.
+- Before restoring from Git, verify that the target diff contains only the
+  experiment being discarded. Preserve any overlapping or unrelated user
+  changes; use a manual rollback when a whole-file restore would remove them.
+
 ### Completion chime
 
 - At the beginning of every new user prompt, immediately stop any completion

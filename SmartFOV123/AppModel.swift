@@ -1,5 +1,4 @@
 import Dispatch
-import Darwin
 import Observation
 import UIKit
 
@@ -37,6 +36,9 @@ final class AppModel {
     private var speechRestartTask: Task<Void, Never>?
     private var speechPartialResetTask: Task<Void, Never>?
     private var backgroundObserverTask: Task<Void, Never>?
+    private var sceneDeactivationObserverTask: Task<Void, Never>?
+    private var sceneActivationObserverTask: Task<Void, Never>?
+    private var foregroundObserverTask: Task<Void, Never>?
     private var timedSessionTask: Task<Void, Never>?
     private var timedSessionFinalGongVolume: Float = 0
     private var instantiatedExperiment: Experiment?
@@ -57,12 +59,14 @@ final class AppModel {
     var statusMessage: String?
 
     init() {
+        DiagnosticLog.event("app", "AppModel initialization started")
         do {
             let catalog = try ProtocolCatalog.loadAvailable()
             availablePlans = catalog.plans
             foveatedRendering = catalog.foveatedRendering
             plan = nil
             trialPhase = .protocolSelection
+            DiagnosticLog.event("app", "protocol catalog loaded; plans=\(catalog.plans.count) foveated=\(catalog.foveatedRendering)")
         } catch {
             availablePlans = []
             foveatedRendering = true
@@ -70,6 +74,7 @@ final class AppModel {
             trialPhase = .configurationError
             statusMessage = error.localizedDescription
             print("SmartFOV123 configuration error: \(error.localizedDescription)")
+            DiagnosticLog.event("error", "configuration load failed: \(error.localizedDescription)")
         }
     }
 
@@ -160,6 +165,7 @@ final class AppModel {
     @discardableResult
     func prepareCurrentTrial() async -> Bool {
         if instantiatedExperiment != nil {
+            DiagnosticLog.event("trial", "prepare skipped; trial \(currentTrialIndex + 1) already instantiated")
             return true
         }
         guard let plan, !plan.trials.isEmpty else { return false }
@@ -173,6 +179,7 @@ final class AppModel {
         }
         let scheduledTrial = plan.trials[scheduledIndex]
         let trialNumber = currentTrialIndex + 1
+        DiagnosticLog.event("trial", "prepare begin; trial=\(trialNumber) scheduleIndex=\(scheduledIndex) condition=\(scheduledTrial.conditionNumber)")
         instantiatedExperiment = await Task.detached(priority: .userInitiated) {
             scheduledTrial.instantiate(trialNumber: trialNumber)
         }.value
@@ -181,6 +188,7 @@ final class AppModel {
             print(
                 "SmartFOV123 trial \(trialNumber) passthrough dimming: \(configuredPassthroughDimming)"
             )
+            DiagnosticLog.event("trial", "instantiated trial=\(trialNumber) dimming=\(configuredPassthroughDimming)")
         }
         if hasCompletedExperiment {
             instantiatedExperiment = nil
@@ -193,6 +201,7 @@ final class AppModel {
                 score: completedTargetCount,
                 trialsRemaining: max(0, trialCount - currentTrialIndex)
             )
+            DiagnosticLog.event("trial", "resource request published; trial=\(trialNumber) revision=\(preparedTrialRevision ?? -1)")
         }
         return true
     }
@@ -249,12 +258,38 @@ final class AppModel {
     func startWindowlessExperienceIfNeeded() {
         guard !hasStartedWindowlessExperience else { return }
         hasStartedWindowlessExperience = true
+        DiagnosticLog.event("lifecycle", "windowless experience starting")
         backgroundObserverTask = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(
-                named: UIApplication.didEnterBackgroundNotification
+                named: UIScene.didEnterBackgroundNotification
             ) {
                 guard let self else { return }
-                self.terminateWhenBackgrounded()
+                DiagnosticLog.event("lifecycle", "UIScene.didEnterBackground received")
+                self.prepareForBackground()
+            }
+        }
+        sceneDeactivationObserverTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(
+                named: UIScene.willDeactivateNotification
+            ) {
+                guard self != nil else { return }
+                DiagnosticLog.event("lifecycle", "UIScene.willDeactivate received")
+            }
+        }
+        foregroundObserverTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(
+                named: UIScene.willEnterForegroundNotification
+            ) {
+                guard self != nil else { return }
+                DiagnosticLog.event("lifecycle", "UIScene.willEnterForeground received")
+            }
+        }
+        sceneActivationObserverTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(
+                named: UIScene.didActivateNotification
+            ) {
+                guard self != nil else { return }
+                DiagnosticLog.event("lifecycle", "UIScene.didActivate received")
             }
         }
         Task { @MainActor [weak self] in
@@ -273,6 +308,7 @@ final class AppModel {
     }
 
     private func startWindowlessExperience() async {
+        DiagnosticLog.event("app", "immersive startup begin")
         immersiveSpaceState = .inTransition
 
         if plan != nil, !(await prepareCurrentTrial()) {
@@ -291,6 +327,7 @@ final class AppModel {
 
         immersiveSpaceState = .open
         await waitForRendererToStart()
+        DiagnosticLog.event("app", "immersive startup ready; rendererRunning=\(stimulusPresentationState.isRendererRunning)")
         await startSpeechConfirmation()
     }
 
@@ -304,6 +341,7 @@ final class AppModel {
 
     func markCurrentTrialStarted() {
         currentTrialMeasurement = .init(startTimeMS: elapsedMilliseconds())
+        DiagnosticLog.event("trial", "measurement started; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase))")
     }
 
     func startSpeechConfirmation() async {
@@ -312,6 +350,7 @@ final class AppModel {
         speechRestartTask?.cancel()
         speechRestartTask = nil
         guard trialPhase != .configurationError, trialPhase != .debriefing else { return }
+        DiagnosticLog.event("speech", "recognition start requested; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase))")
 
         do {
             try await speechListener.start(
@@ -322,6 +361,7 @@ final class AppModel {
                     self?.handleRecognitionEnded(error)
                 }
             )
+            DiagnosticLog.event("speech", "recognition started; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase))")
             switch trialPhase {
             case .protocolSelection:
                 statusMessage = "Listening for a protocol number."
@@ -349,6 +389,7 @@ final class AppModel {
                 return
             }
             statusMessage = "Speech recognition couldn't start: \(error.localizedDescription) Retrying…"
+            DiagnosticLog.event("error", "recognition start failed: \(error.localizedDescription)")
             if immersiveSpaceState == .open {
                 scheduleSpeechRestart(afterNanoseconds: 1_000_000_000)
             }
@@ -404,6 +445,7 @@ final class AppModel {
             }
             return
         }
+        DiagnosticLog.event("speech", "three-digit candidate parsed; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase)) candidate=\(candidate)")
         currentTrialMeasurement?.speech.append(
             .init(
                 utterance: SpokenDigitParser.normalizedForStorage(
@@ -423,6 +465,7 @@ final class AppModel {
                 currentTrialMeasurement?.digitRevealMS = targetReadMS
                 resultFileWriter.markFirstTargetRead(atMS: targetReadMS)
                 startTimedSessionIfNeeded()
+                DiagnosticLog.event("trial", "target cue confirmed; trial=\(currentTrialIndex + 1); search phase entered")
                 stimulusPresentationState.revealGrid()
                 feedbackSoundPlayer.playPop()
                 statusMessage = "Target confirmed. Find it, then read the three crossing digits."
@@ -455,6 +498,7 @@ final class AppModel {
                     )
                 )
                 completedTargetCount += 1
+                DiagnosticLog.event("result", "trial saved; trial=\(currentTrialIndex + 1) score=\(completedTargetCount) elapsedMS=\(targetFoundMS)")
                 statusMessage = "Correct — heard \(candidate)."
                 stimulusPresentationState.highlightSolution()
                 scheduleCompletedTrialAdvance()
@@ -511,6 +555,7 @@ final class AppModel {
     private func handleRecognitionEnded(_ error: Error?) {
         guard immersiveSpaceState == .open else { return }
         guard trialPhase != .configurationError, trialPhase != .debriefing else { return }
+        DiagnosticLog.event("speech", "recognition ended; phase=\(String(describing: trialPhase)) error=\(error?.localizedDescription ?? "none")")
         if let error {
             statusMessage = "Speech recognition paused: \(error.localizedDescription) Retrying…"
         } else if trialPhase == .protocolSelection {
@@ -679,6 +724,7 @@ final class AppModel {
     }
 
     private func scheduleCompletedTrialAdvance() {
+        DiagnosticLog.event("trial", "advance scheduled; completed trial=\(currentTrialIndex + 1)")
         Task { @MainActor [weak self] in
             await self?.advanceCompletedTrialInPersistentSpace()
         }
@@ -688,6 +734,7 @@ final class AppModel {
         guard !isAdvancingCompletedTrial,
               immersiveSpaceState == .open else { return }
         isAdvancingCompletedTrial = true
+        DiagnosticLog.event("trial", "advance begin; completed trial=\(currentTrialIndex + 1)")
         defer { isAdvancingCompletedTrial = false }
 
         stopSpeechConfirmation()
@@ -712,15 +759,18 @@ final class AppModel {
         guard !hasCompletedExperiment else { return }
         presentPreparedTrial()
         markCurrentTrialStartedIfReady()
+        DiagnosticLog.event("trial", "advance complete; active trial=\(currentTrialIndex + 1)")
         await startSpeechConfirmation()
     }
 
     private func waitForPreparedTrialResources() async {
         guard let preparedTrialRevision else { return }
+        DiagnosticLog.event("render", "waiting for resources; revision=\(preparedTrialRevision)")
         while !stimulusPresentationState.isTrialReady(revision: preparedTrialRevision) {
             guard immersiveSpaceState == .open || immersiveSpaceState == .inTransition else { return }
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
+        DiagnosticLog.event("render", "resource wait ended; revision=\(preparedTrialRevision) ready=\(stimulusPresentationState.isTrialReady(revision: preparedTrialRevision))")
     }
 
     private func startTimedSessionIfNeeded() {
@@ -732,6 +782,7 @@ final class AppModel {
               !hasTimedSessionEnded else { return }
 
         let durationNanoseconds = UInt64(seconds) * 1_000_000_000
+        DiagnosticLog.event("session", "timed session started; durationSeconds=\(seconds)")
         stimulusPresentationState.startTimeBar(durationSeconds: seconds)
         if let stimulus = instantiatedExperiment?.configuration.stimulus {
             timedSessionFinalGongVolume = stimulus.finalGongVolume
@@ -753,6 +804,7 @@ final class AppModel {
     private func finishTimedSession(durationSeconds: Int) {
         guard !hasTimedSessionEnded else { return }
         hasTimedSessionEnded = true
+        DiagnosticLog.event("session", "timed session finishing; durationSeconds=\(durationSeconds) score=\(completedTargetCount)")
         stimulusPresentationState.stopTimeBar()
         metronomePlayer.finishSession()
         timedSessionTask = nil
@@ -782,19 +834,36 @@ final class AppModel {
     }
 
     /// The Digital Crown returns the windowless experience to Home View,
-    /// which backgrounds the research app. End the session at that point.
-    private func terminateWhenBackgrounded() -> Never {
-        speechListener.stop()
+    /// which backgrounds the research app. Save and quiet the session, then
+    /// let visionOS suspend or terminate the process through its normal app
+    /// lifecycle instead of forcing process termination with exit().
+    private func prepareForBackground() {
+        print("SmartFOV123 lifecycle: scene entered background; saving and stopping session work.")
+        DiagnosticLog.event("lifecycle", "background cleanup begin; phase=\(String(describing: trialPhase)) trial=\(currentTrialIndex + 1)")
+        let wasExperimentActive = hasExperimentBegun && !hasCompletedExperiment
+        speechListener.prepareForBackground()
         metronomePlayer.stop()
         timedSessionTask?.cancel()
+        timedSessionTask = nil
         speechRestartTask?.cancel()
+        speechRestartTask = nil
+        speechPartialResetTask?.cancel()
+        speechPartialResetTask = nil
         stimulusPresentationState.hide()
         do {
             try resultFileWriter.finishInterruptedExperiment(endTimeMS: elapsedMilliseconds())
         } catch {
-            print("SmartFOV123 result error during exit: \(error.localizedDescription)")
+            print("SmartFOV123 result error during background cleanup: \(error.localizedDescription)")
         }
-        exit(EXIT_SUCCESS)
+        currentTrialMeasurement = nil
+        immersiveSpaceState = .closed
+        if wasExperimentActive {
+            hasTimedSessionEnded = true
+            trialPhase = .debriefing
+            statusMessage = "Experiment interrupted when SmartFOV123 left the foreground."
+            synchronizeParticipantPresentation()
+        }
+        DiagnosticLog.event("lifecycle", "background cleanup complete; wasExperimentActive=\(wasExperimentActive)")
     }
 
 }
