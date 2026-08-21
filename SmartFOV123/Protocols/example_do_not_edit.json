@@ -73,7 +73,7 @@
         "wrong": { "file": "wrong.caf", "volume": 0.5 }
     },
     "speech": {
-      "reset_seconds": 1.5,
+      "max_interdigit_pause_seconds": 0.8,
       "aliases": {
         "0": ["zero", "oh", "o"],
         "1": ["one", "won"],

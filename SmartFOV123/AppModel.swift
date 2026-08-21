@@ -35,6 +35,7 @@ final class AppModel {
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
     private var speechPartialResetTask: Task<Void, Never>?
+    private var recognizedDigitCountInCurrentAttempt = 0
     private var backgroundObserverTask: Task<Void, Never>?
     private var sceneDeactivationObserverTask: Task<Void, Never>?
     private var sceneActivationObserverTask: Task<Void, Never>?
@@ -347,6 +348,7 @@ final class AppModel {
     func startSpeechConfirmation() async {
         speechPartialResetTask?.cancel()
         speechPartialResetTask = nil
+        recognizedDigitCountInCurrentAttempt = 0
         speechRestartTask?.cancel()
         speechRestartTask = nil
         guard trialPhase != .configurationError, trialPhase != .debriefing else { return }
@@ -429,22 +431,24 @@ final class AppModel {
         }
 
         let aliasLookup = experiment.configuration.speech.aliasLookup
-        speechPartialResetTask?.cancel()
-        speechPartialResetTask = nil
         guard let candidate = SpokenDigitParser.parseThreeDigits(
             from: transcript,
             aliases: aliasLookup
         ) else {
-            if SpokenDigitParser.incompleteDigitCount(
+            if let digitCount = SpokenDigitParser.incompleteDigitCount(
                 from: transcript,
                 aliases: aliasLookup
-            ) != nil {
+            ), digitCount > recognizedDigitCountInCurrentAttempt {
+                recognizedDigitCountInCurrentAttempt = digitCount
                 scheduleIncompleteSpeechReset(
-                    afterSeconds: experiment.configuration.speech.resetSeconds
+                    afterSeconds: experiment.configuration.speech.maxInterdigitPauseSeconds
                 )
             }
             return
         }
+        speechPartialResetTask?.cancel()
+        speechPartialResetTask = nil
+        recognizedDigitCountInCurrentAttempt = 3
         DiagnosticLog.event("speech", "three-digit candidate parsed; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase)) candidate=\(candidate)")
         currentTrialMeasurement?.speech.append(
             .init(

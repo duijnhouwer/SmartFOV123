@@ -404,7 +404,7 @@ private struct CompletedTrial: Encodable {
             )
             speech = .init(
                 aliases: configuration.speech.digitAliases,
-                resetSeconds: configuration.speech.resetSeconds
+                maxInterdigitPauseSeconds: configuration.speech.maxInterdigitPauseSeconds
             )
         }
 
@@ -566,11 +566,11 @@ private struct CompletedTrial: Encodable {
 
     struct Speech: Encodable {
         let aliases: [String: [String]]
-        let resetSeconds: Float
+        let maxInterdigitPauseSeconds: Float
 
         private enum CodingKeys: String, CodingKey {
             case aliases
-            case resetSeconds = "reset_seconds"
+            case maxInterdigitPauseSeconds = "max_interdigit_pause_seconds"
         }
     }
 }
@@ -720,7 +720,7 @@ private enum JSONPrettyPrinter {
                 "inner_corner_radius_degrees", "outer_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("aliases") {
-            preferredOrder = ["aliases", "reset_seconds"]
+            preferredOrder = ["aliases", "max_interdigit_pause_seconds"]
         } else {
             preferredOrder = []
         }

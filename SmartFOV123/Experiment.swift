@@ -121,7 +121,7 @@ struct DisplayConfiguration: Sendable {
 
 struct SpeechConfiguration: Sendable {
     let digitAliases: [String: [String]]
-    let resetSeconds: Float
+    let maxInterdigitPauseSeconds: Float
 
     var aliasLookup: [String: Int] {
         var lookup: [String: Int] = [:]
@@ -702,11 +702,11 @@ private struct FOVPatch: Decodable {
 
 private struct SpeechPatch: Decodable {
     let aliases: [String: [String]]?
-    let resetSeconds: Float?
+    let maxInterdigitPauseSeconds: Float?
 
     private enum CodingKeys: String, CodingKey {
         case aliases
-        case resetSeconds = "reset_seconds"
+        case maxInterdigitPauseSeconds = "max_interdigit_pause_seconds"
     }
 }
 
@@ -748,7 +748,7 @@ private struct ResolvedConditionPatch {
     var surround = ResolvedSurround()
     var fov = ResolvedFOV()
     var aliases: [String: [String]] = [:]
-    var speechResetSeconds: Float?
+    var speechMaxInterdigitPauseSeconds: Float?
 
     mutating func apply(_ definition: ConditionDefinition) {
         blockNumber = definition.blockNumber ?? blockNumber
@@ -829,7 +829,8 @@ private struct ResolvedConditionPatch {
         if let patch = definition.speech?.aliases {
             aliases.merge(patch) { _, child in child }
         }
-        speechResetSeconds = definition.speech?.resetSeconds ?? speechResetSeconds
+        speechMaxInterdigitPauseSeconds = definition.speech?.maxInterdigitPauseSeconds
+            ?? speechMaxInterdigitPauseSeconds
     }
 }
 
@@ -1351,11 +1352,15 @@ private enum ConditionResolver {
                 "annotation.font_name ‘\(annotationFontName)’ is not installed on this device."
             )
         }
-        guard let speechResetSeconds = patch.speechResetSeconds else {
-            try missing("speech.reset_seconds")
+        guard let speechMaxInterdigitPauseSeconds = patch.speechMaxInterdigitPauseSeconds else {
+            try missing("speech.max_interdigit_pause_seconds")
         }
-        guard speechResetSeconds.isFinite, speechResetSeconds > 0 else {
-            throw invalid(definitionName, "speech.reset_seconds must be finite and greater than zero.")
+        guard speechMaxInterdigitPauseSeconds.isFinite,
+              speechMaxInterdigitPauseSeconds > 0 else {
+            throw invalid(
+                definitionName,
+                "speech.max_interdigit_pause_seconds must be finite and greater than zero."
+            )
         }
     }
 
@@ -1426,7 +1431,7 @@ private enum ConditionResolver {
             ),
             speech: .init(
                 digitAliases: patch.aliases,
-                resetSeconds: patch.speechResetSeconds!
+                maxInterdigitPauseSeconds: patch.speechMaxInterdigitPauseSeconds!
             ),
             stimulus: .init(
                 eye: patch.fov.eye!,
@@ -1575,7 +1580,11 @@ private enum JSONShapeValidator {
             )
             if let rawSpeech = condition["speech"] {
                 let speech = try dictionary(rawSpeech, path: "\(path).speech")
-                try keys(speech, allowed: ["aliases", "reset_seconds"], path: "\(path).speech")
+                try keys(
+                    speech,
+                    allowed: ["aliases", "max_interdigit_pause_seconds"],
+                    path: "\(path).speech"
+                )
                 if let rawAliases = speech["aliases"] {
                     let aliases = try dictionary(rawAliases, path: "\(path).speech.aliases")
                     try keys(aliases, allowed: Set((0...9).map(String.init)), path: "\(path).speech.aliases")

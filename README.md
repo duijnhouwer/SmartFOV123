@@ -30,7 +30,7 @@ Schema version 6 uses snake_case property names and enum values. The root protoc
 
 Negative `timer.metronome.start_seconds` values disable their paired BPM stages; setting every start negative suppresses the metronome. `timer.metronome.volume` controls the peak-normalized tick and tock assets from silence (`0`) through full amplitude (`1`) using a perceptual fader curve; the configured value itself is preserved in results. `timer.final_gong` controls whether `gong.caf` plays when the final-score prompt opens.
 
-`speech.reset_seconds` controls how long an incomplete one- or two-digit trial response may remain idle before its recognition pass is restarted and forgotten. It must be defined in `master_condition_template`.
+`speech.max_interdigit_pause_seconds` is the longest permitted pause between spoken digits in a three-digit trial response. After the first or second recognized digit, the next digit must begin within this interval. If the interval expires, the partial response is forgotten and the next spoken digit starts a new attempt. It must be defined in `master_condition_template`.
 
 Every instantiated condition requires `block_nr >= 1`. Used block numbers must begin at 1 and be consecutive without gaps. Blocks run in ascending order, and their trials are randomized within each block. Fixed-trial mode runs that schedule once. Loop-trials mode cycles the scheduled order until its deadline, reusing each trial's configured random seed on every pass. Use `"shuffle"` when you want each scheduled trial to receive a unique seed at experiment creation; use a fixed seed or a seed list when you intentionally want repeats. Trial names (`trial1`, `trial2`, …) remain unique when loop-trials mode revisits a source condition.
 
