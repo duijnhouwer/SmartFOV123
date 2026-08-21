@@ -196,6 +196,7 @@ private enum RendererError: LocalizedError {
 
 actor Renderer {
     private static let maxFramesInFlight = 3
+    @MainActor private static var activeLayerRendererIDs = Set<ObjectIdentifier>()
 
     private let layerRenderer: LayerRenderer
     private let appModel: AppModel
@@ -323,6 +324,15 @@ actor Renderer {
 
     @MainActor
     static func start(_ layerRenderer: LayerRenderer, appModel: AppModel) {
+        let layerRendererID = ObjectIdentifier(layerRenderer)
+        guard activeLayerRendererIDs.insert(layerRendererID).inserted else {
+            DiagnosticLog.event(
+                "render",
+                "duplicate render task launch ignored; layerRenderer=\(layerRendererID)"
+            )
+            return
+        }
+
         DiagnosticLog.event("render", "render task launch requested")
         Task(executorPreference: RenderTaskExecutor.shared) {
             do {
@@ -335,6 +345,9 @@ actor Renderer {
                     appModel.statusMessage = error.localizedDescription
                     appModel.immersiveSpaceState = .open
                 }
+            }
+            await MainActor.run {
+                activeLayerRendererIDs.remove(layerRendererID)
             }
         }
     }
@@ -515,6 +528,11 @@ actor Renderer {
     }
 
     private func renderFrame() {
+        // Narrow the interval between checking the compositor state and asking
+        // for a frame. xrOS 27 beta 6 has aborted inside queryNextFrame() when
+        // the layer transitions away from running between render-loop steps.
+        guard case .running = layerRenderer.state else { return }
+
         guard let frame = layerRenderer.queryNextFrame() else {
             Thread.sleep(forTimeInterval: 0.001)
             return
