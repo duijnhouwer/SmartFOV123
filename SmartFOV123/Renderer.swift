@@ -544,24 +544,10 @@ actor Renderer {
         // timing is unavailable.
         guard let timing = frame.predictTiming() else { return }
 
-        frame.startUpdate()
-        frame.endUpdate()
-        LayerRenderer.Clock().wait(until: timing.optimalInputTime)
-
-        // Resolve every fallible prerequisite before starting submission. If
-        // any of these are unavailable, this frame has not entered the
-        // submission phase and can be safely skipped. Once queryDrawables()
-        // returns actual drawables below, there must be no early exit before
-        // their presentation is committed and endSubmission() is called.
-        guard worldTracking.state == .running,
-              let deviceAnchor = worldTracking.queryDeviceAnchor(
-                atTimestamp: timing.presentationTime.timeInterval
-              ) else {
-            publishDeviceTrackingWaitIfNeeded()
-            return
-        }
-        clearDeviceTrackingWaitIfNeeded()
-
+        // Resolve fallible Metal prerequisites before beginning the compositor
+        // frame phases. Once startUpdate() runs below, this function proceeds
+        // through submission unless Compositor Services itself supplies no
+        // drawable, which its documented render-loop pattern permits.
         #if !targetEnvironment(simulator)
         residencySetIndex = (residencySetIndex + 1) % Self.maxFramesInFlight
         let reusableFrameSignalValue = residencySetSignalValues[residencySetIndex]
@@ -580,6 +566,10 @@ actor Renderer {
         }
         commandBuffer.label = "SmartFOV123 frame"
 
+        frame.startUpdate()
+        frame.endUpdate()
+        LayerRenderer.Clock().wait(until: timing.optimalInputTime)
+
         // Apple's Compositor Services render-loop contract starts submission
         // before querying drawables. If no drawable is available, abandon this
         // frame without calling endSubmission(), matching Apple's sample. A
@@ -596,13 +586,22 @@ actor Renderer {
         }
         guard !drawables.isEmpty else { return }
 
+        var hasDeviceAnchor = false
         for drawable in drawables {
             // The drawable carries the compositor's latest presentation time.
-            // Prefer the anchor for that timestamp, while retaining the
-            // prerequisite anchor above as a safe transient fallback.
-            drawable.deviceAnchor = worldTracking.queryDeviceAnchor(
+            // Anchor assignment is optional. If tracking is transiently
+            // unavailable, leave the anchor unset and still complete this
+            // frame's submission lifecycle.
+            guard let deviceAnchor = worldTracking.queryDeviceAnchor(
                 atTimestamp: drawable.frameTiming.presentationTime.timeInterval
-            ) ?? deviceAnchor
+            ) else { continue }
+            drawable.deviceAnchor = deviceAnchor
+            hasDeviceAnchor = true
+        }
+        if hasDeviceAnchor {
+            clearDeviceTrackingWaitIfNeeded()
+        } else {
+            publishDeviceTrackingWaitIfNeeded()
         }
         let surfaceTexture: MTLTexture?
         let presentationContent = presentationState.content
@@ -911,9 +910,9 @@ actor Renderer {
         isWaitingForDeviceTracking = true
         DiagnosticLog.event(
             "tracking",
-            "device anchor unavailable; skipping frame before submission"
+            "device anchor unavailable; submitting frame without pose correction"
         )
-        publishError("Waiting for headset tracking before presenting the trial.")
+        publishError("Headset tracking is temporarily unavailable; rendering without pose correction.")
     }
 
     private func clearDeviceTrackingWaitIfNeeded() {
@@ -921,7 +920,7 @@ actor Renderer {
         isWaitingForDeviceTracking = false
         DiagnosticLog.event("tracking", "device anchor restored")
         Task { @MainActor in
-            if appModel.statusMessage == "Waiting for headset tracking before presenting the trial." {
+            if appModel.statusMessage == "Headset tracking is temporarily unavailable; rendering without pose correction." {
                 appModel.statusMessage = nil
             }
         }
