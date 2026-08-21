@@ -5,7 +5,7 @@
   "debriefing_title": "Time's up!",
   "debriefing": "Your score is <NUMBER_OF_TARGETS_FOUND>. Well done!\n\nPress the Digital Crown to exit",
   "foveated_rendering": true,
-  "task_mode": "loop_trials_900_seconds",
+  "task_mode": "loop_trials_600_seconds",
   "master_condition_template": {
     "random_seed": "shuffle",
     "passthrough_dimming": 0.0,
