@@ -426,7 +426,6 @@ private struct CompletedTrial: Encodable {
         let tiles: Tiles
         let surround: Surround
         let fov: FOV
-        let speech: Speech
 
         init(experiment: Experiment) {
             let configuration = experiment.configuration
@@ -500,14 +499,10 @@ private struct CompletedTrial: Encodable {
                 verticalOffsetDegrees: stimulus.fovVerticalOffsetDegrees,
                 distanceMeters: stimulus.distanceMeters
             )
-            speech = .init(
-                aliases: configuration.speech.digitAliases,
-                maxInterdigitPauseSeconds: configuration.speech.maxInterdigitPauseSeconds
-            )
         }
 
         private enum CodingKeys: String, CodingKey {
-            case digits, annotation, countdown, tiles, surround, fov, speech
+            case digits, annotation, countdown, tiles, surround, fov
             case feedbackSounds = "feedback_sounds"
             case conditionNumber = "condition_nr"
             case blockNumber = "block_nr"
@@ -651,15 +646,6 @@ private struct CompletedTrial: Encodable {
         }
     }
 
-    struct Speech: Encodable {
-        let aliases: [String: [String]]
-        let maxInterdigitPauseSeconds: Float
-
-        private enum CodingKeys: String, CodingKey {
-            case aliases
-            case maxInterdigitPauseSeconds = "max_interdigit_pause_seconds"
-        }
-    }
 }
 
 private enum JSONPrettyPrinter {
@@ -770,12 +756,12 @@ private enum JSONPrettyPrinter {
         } else if dictionary.keys.contains("condition_nr") {
             preferredOrder = [
                 "condition_nr", "block_nr", "random_seed", "passthrough_dimming", "digits", "annotation", "countdown", "feedback_sounds",
-                "tiles", "surround", "fov", "speech"
+                "tiles", "surround", "fov"
             ]
         } else if dictionary.keys.contains("stopwatch_volume") {
             preferredOrder = ["bar", "stopwatch_volume", "final_gong_volume"]
         } else if dictionary.keys.contains("start_digits") {
-            preferredOrder = ["start_digits", "stop_command", "cross_digits"]
+            preferredOrder = ["start_digits", "stop_command", "cross_digits", "speech"]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
         } else if dictionary.keys.contains("absolute_start_time_ms") {

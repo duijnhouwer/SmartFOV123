@@ -79,6 +79,7 @@ struct InputConfiguration: Decodable, Encodable, Sendable {
     let startDigits: DigitInputMethod
     let stopCommand: StopCommandInputMethod
     let crossDigits: DigitInputMethod
+    let speech: SpeechConfiguration
 
     var usesTrialSpeech: Bool {
         startDigits == .speech || stopCommand == .speechStop || crossDigits == .speech
@@ -88,16 +89,20 @@ struct InputConfiguration: Decodable, Encodable, Sendable {
         startDigits == .keyboard || stopCommand == .keyboardSpace || crossDigits == .keyboard
     }
 
-    static let voiceOnly = InputConfiguration(
-        startDigits: .speech,
-        stopCommand: .speechStop,
-        crossDigits: .speech
-    )
+    func replacingModesWithVoiceOnly() -> InputConfiguration {
+        InputConfiguration(
+            startDigits: .speech,
+            stopCommand: .speechStop,
+            crossDigits: .speech,
+            speech: speech
+        )
+    }
 
     private enum CodingKeys: String, CodingKey {
         case startDigits = "start_digits"
         case stopCommand = "stop_command"
         case crossDigits = "cross_digits"
+        case speech
     }
 }
 
@@ -155,7 +160,7 @@ struct DisplayConfiguration: Sendable {
     let passthroughDimming: Double
 }
 
-struct SpeechConfiguration: Sendable {
+struct SpeechConfiguration: Decodable, Encodable, Sendable {
     let digitAliases: [String: [String]]
     let maxInterdigitPauseSeconds: Float
 
@@ -173,6 +178,12 @@ struct SpeechConfiguration: Sendable {
     static func normalize(_ alias: String) -> String {
         alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case digitAliases = "aliases"
+        case maxInterdigitPauseSeconds = "max_interdigit_pause_seconds"
+    }
+
 }
 
 struct StimulusConfiguration: Sendable {
@@ -246,7 +257,6 @@ struct StimulusConfiguration: Sendable {
 
 struct ExperimentConfiguration: Sendable {
     let display: DisplayConfiguration
-    let speech: SpeechConfiguration
     let stimulus: StimulusConfiguration
 }
 
@@ -740,16 +750,6 @@ private struct FOVPatch: Decodable {
     }
 }
 
-private struct SpeechPatch: Decodable {
-    let aliases: [String: [String]]?
-    let maxInterdigitPauseSeconds: Float?
-
-    private enum CodingKeys: String, CodingKey {
-        case aliases
-        case maxInterdigitPauseSeconds = "max_interdigit_pause_seconds"
-    }
-}
-
 private struct ConditionDefinition: Decodable {
     let blockNumber: Int?
     let repeats: Int?
@@ -762,14 +762,13 @@ private struct ConditionDefinition: Decodable {
     let tiles: TilePatch?
     let surround: SurroundPatch?
     let fov: FOVPatch?
-    let speech: SpeechPatch?
 
     private enum CodingKeys: String, CodingKey {
         case repeats
         case randomSeed = "random_seed"
         case passthroughDimming = "passthrough_dimming"
         case blockNumber = "block_nr"
-        case digits, annotation, countdown, feedbackSounds = "feedback_sounds", tiles, surround, fov, speech
+        case digits, annotation, countdown, feedbackSounds = "feedback_sounds", tiles, surround, fov
     }
 
 }
@@ -787,8 +786,6 @@ private struct ResolvedConditionPatch {
     var tiles = ResolvedTiles()
     var surround = ResolvedSurround()
     var fov = ResolvedFOV()
-    var aliases: [String: [String]] = [:]
-    var speechMaxInterdigitPauseSeconds: Float?
 
     mutating func apply(_ definition: ConditionDefinition) {
         blockNumber = definition.blockNumber ?? blockNumber
@@ -863,11 +860,6 @@ private struct ResolvedConditionPatch {
             fov.verticalOffsetDegrees = patch.verticalOffsetDegrees ?? fov.verticalOffsetDegrees
             fov.distanceMeters = patch.distanceMeters ?? fov.distanceMeters
         }
-        if let patch = definition.speech?.aliases {
-            aliases.merge(patch) { _, child in child }
-        }
-        speechMaxInterdigitPauseSeconds = definition.speech?.maxInterdigitPauseSeconds
-            ?? speechMaxInterdigitPauseSeconds
     }
 }
 
@@ -985,6 +977,8 @@ private enum ConditionResolver {
                 "debriefing_title must be nonempty and have no leading or trailing whitespace."
             )
         }
+
+        try validateSpeech(file.input.speech)
 
         guard file.masterConditionTemplate.blockNumber == nil else {
             throw ExperimentError.invalidConfiguration(
@@ -1194,35 +1188,6 @@ private enum ConditionResolver {
         guard let verticalOffset = patch.fov.verticalOffsetDegrees else { try missing("fov.vertical_offset_degrees") }
         guard let distance = patch.fov.distanceMeters else { try missing("fov.distance_meters") }
 
-        let requiredDigitKeys = Set((0...9).map(String.init))
-        guard Set(patch.aliases.keys) == requiredDigitKeys else {
-            throw invalid(definitionName, "speech.aliases must resolve exactly the keys 0 through 9.")
-        }
-        var aliasOwners: [String: String] = [:]
-        for digit in requiredDigitKeys.sorted() {
-            guard let aliases = patch.aliases[digit], !aliases.isEmpty else {
-                throw invalid(definitionName, "speech.aliases.\(digit) must contain at least one spoken form.")
-            }
-            var aliasesForDigit = Set<String>()
-            for alias in aliases {
-                let normalized = SpeechConfiguration.normalize(alias)
-                guard !normalized.isEmpty,
-                      normalized.unicodeScalars.allSatisfy(CharacterSet.letters.contains) else {
-                    throw invalid(
-                        definitionName,
-                        "speech.aliases.\(digit) contains ‘\(alias)’; aliases must be single words containing letters only."
-                    )
-                }
-                guard aliasesForDigit.insert(normalized).inserted else {
-                    throw invalid(definitionName, "speech.aliases.\(digit) contains duplicate alias ‘\(normalized)’.")
-                }
-                if let existing = aliasOwners[normalized], existing != digit {
-                    throw invalid(definitionName, "speech alias ‘\(normalized)’ belongs to both \(existing) and \(digit).")
-                }
-                aliasOwners[normalized] = digit
-            }
-        }
-
         let positive: [(String, Float)] = [
             ("digits.height_degrees", digitHeight),
             ("annotation.height_degrees", annotationHeight),
@@ -1371,15 +1336,37 @@ private enum ConditionResolver {
                 "annotation.font_name ‘\(annotationFontName)’ is not installed on this device."
             )
         }
-        guard let speechMaxInterdigitPauseSeconds = patch.speechMaxInterdigitPauseSeconds else {
-            try missing("speech.max_interdigit_pause_seconds")
+    }
+
+    private static func validateSpeech(_ speech: SpeechConfiguration) throws {
+        let requiredDigitKeys = Set((0...9).map(String.init))
+        guard Set(speech.digitAliases.keys) == requiredDigitKeys else {
+            throw ExperimentError.invalidConfiguration("input.speech.aliases must define exactly the keys 0 through 9.")
         }
-        guard speechMaxInterdigitPauseSeconds.isFinite,
-              speechMaxInterdigitPauseSeconds > 0 else {
-            throw invalid(
-                definitionName,
-                "speech.max_interdigit_pause_seconds must be finite and greater than zero."
-            )
+        var aliasOwners: [String: String] = [:]
+        for digit in requiredDigitKeys.sorted() {
+            guard let aliases = speech.digitAliases[digit], !aliases.isEmpty else {
+                throw ExperimentError.invalidConfiguration("input.speech.aliases.\(digit) must contain at least one spoken form.")
+            }
+            var aliasesForDigit = Set<String>()
+            for alias in aliases {
+                let normalized = SpeechConfiguration.normalize(alias)
+                guard !normalized.isEmpty,
+                      normalized.unicodeScalars.allSatisfy(CharacterSet.letters.contains) else {
+                    throw ExperimentError.invalidConfiguration("input.speech.aliases.\(digit) contains ‘\(alias)’; aliases must be single words containing letters only.")
+                }
+                guard aliasesForDigit.insert(normalized).inserted else {
+                    throw ExperimentError.invalidConfiguration("input.speech.aliases.\(digit) contains duplicate alias ‘\(normalized)’.")
+                }
+                if let existing = aliasOwners[normalized], existing != digit {
+                    throw ExperimentError.invalidConfiguration("input.speech alias ‘\(normalized)’ belongs to both \(existing) and \(digit).")
+                }
+                aliasOwners[normalized] = digit
+            }
+        }
+        guard speech.maxInterdigitPauseSeconds.isFinite,
+              speech.maxInterdigitPauseSeconds > 0 else {
+            throw ExperimentError.invalidConfiguration("input.speech.max_interdigit_pause_seconds must be finite and greater than zero.")
         }
     }
 
@@ -1447,10 +1434,6 @@ private enum ConditionResolver {
                 mode: patch.fov.mode!,
                 peakOpacity: patch.fov.peakOpacity!,
                 passthroughDimming: patch.passthroughDimming!
-            ),
-            speech: .init(
-                digitAliases: patch.aliases,
-                maxInterdigitPauseSeconds: patch.speechMaxInterdigitPauseSeconds!
             ),
             stimulus: .init(
                 eye: patch.fov.eye!,
@@ -1530,8 +1513,21 @@ private enum JSONShapeValidator {
         try section(
             rawInput,
             path: "$.input",
-            allowed: ["start_digits", "stop_command", "cross_digits"]
+            allowed: ["start_digits", "stop_command", "cross_digits", "speech"]
         )
+        let input = try dictionary(rawInput, path: "$.input")
+        try section(
+            input["speech"],
+            path: "$.input.speech",
+            allowed: ["aliases", "max_interdigit_pause_seconds"]
+        )
+        if let rawSpeech = input["speech"] {
+            let speech = try dictionary(rawSpeech, path: "$.input.speech")
+            if let rawAliases = speech["aliases"] {
+                let aliases = try dictionary(rawAliases, path: "$.input.speech.aliases")
+                try keys(aliases, allowed: Set((0...9).map(String.init)), path: "$.input.speech.aliases")
+            }
+        }
         guard let rawMaster = root["master_condition_template"] else {
             throw invalid("$.master_condition_template", "is required.")
         }
@@ -1552,7 +1548,7 @@ private enum JSONShapeValidator {
     ) throws {
             let condition = try dictionary(rawDefinition, path: path)
             var allowed: Set<String> = [
-                "random_seed", "passthrough_dimming", "digits", "annotation", "countdown", "feedback_sounds", "tiles", "surround", "fov", "speech"
+                "random_seed", "passthrough_dimming", "digits", "annotation", "countdown", "feedback_sounds", "tiles", "surround", "fov"
             ]
             if schedulingFields {
                 allowed.formUnion(["block_nr", "repeats"])
@@ -1598,18 +1594,6 @@ private enum JSONShapeValidator {
                 path: "\(path).fov",
                 allowed: ["eye", "mode", "peak_opacity", "width_degrees", "height_degrees", "zoomed_width_degrees", "zoomed_height_degrees", "horizontal_offset_degrees", "vertical_offset_degrees", "distance_meters"]
             )
-            if let rawSpeech = condition["speech"] {
-                let speech = try dictionary(rawSpeech, path: "\(path).speech")
-                try keys(
-                    speech,
-                    allowed: ["aliases", "max_interdigit_pause_seconds"],
-                    path: "\(path).speech"
-                )
-                if let rawAliases = speech["aliases"] {
-                    let aliases = try dictionary(rawAliases, path: "\(path).speech.aliases")
-                    try keys(aliases, allowed: Set((0...9).map(String.init)), path: "\(path).speech.aliases")
-                }
-            }
     }
 
     private static func section(

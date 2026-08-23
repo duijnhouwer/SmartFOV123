@@ -440,13 +440,13 @@ final class AppModel {
             handleVoiceInputOverride(transcript)
             return
         }
-        guard let experiment else { return }
+        guard experiment != nil else { return }
         switch trialPhase {
         case .configurationError, .protocolSelection, .keyboardUnavailable,
              .debriefing, .transitioning:
             return
         case .participantNumber:
-            handleParticipantNumber(transcript, experiment: experiment)
+            handleParticipantNumber(transcript)
             return
         case .participantConfirmation:
             handleParticipantConfirmation(transcript)
@@ -458,10 +458,12 @@ final class AppModel {
             break
         }
 
-        mergeSpeechSegments(segments, aliases: experiment.configuration.speech.aliasLookup)
+        guard let plan else { return }
+        let speech = plan.input.speech
+        mergeSpeechSegments(segments, aliases: speech.aliasLookup)
 
         if trialPhase == .search,
-           plan?.input.stopCommand == .speechStop,
+           plan.input.stopCommand == .speechStop,
            let stopSegment = segments.first(where: {
                $0.text.lowercased().split(whereSeparator: { !$0.isLetter }).contains("stop")
            }) {
@@ -470,10 +472,10 @@ final class AppModel {
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
             return
         }
-        if trialPhase == .targetCue, plan?.input.startDigits != .speech { return }
-        if trialPhase == .search, plan?.input.crossDigits != .speech { return }
+        if trialPhase == .targetCue, plan.input.startDigits != .speech { return }
+        if trialPhase == .search, plan.input.crossDigits != .speech { return }
 
-        let aliasLookup = experiment.configuration.speech.aliasLookup
+        let aliasLookup = speech.aliasLookup
         guard let candidate = SpokenDigitParser.parseThreeDigits(
             from: transcript,
             aliases: aliasLookup
@@ -484,7 +486,7 @@ final class AppModel {
             ), digitCount > recognizedDigitCountInCurrentAttempt {
                 recognizedDigitCountInCurrentAttempt = digitCount
                 scheduleIncompleteSpeechReset(
-                    afterSeconds: experiment.configuration.speech.maxInterdigitPauseSeconds
+                    afterSeconds: speech.maxInterdigitPauseSeconds
                 )
             }
             return
@@ -748,11 +750,11 @@ final class AppModel {
         currentTrialMeasurement?.speech.sort { $0.startMS < $1.startMS }
     }
 
-    private func handleParticipantNumber(_ transcript: String, experiment: Experiment) {
+    private func handleParticipantNumber(_ transcript: String) {
         guard let plan,
               let candidate = SpokenDigitParser.parseDigits(
             from: transcript,
-            aliases: experiment.configuration.speech.aliasLookup,
+            aliases: plan.input.speech.aliasLookup,
             digitCount: plan.subjectNumberDigitCount
         ) else {
             return
@@ -797,7 +799,7 @@ final class AppModel {
         let words = Set(transcript.lowercased().split { !$0.isLetter }.map(String.init))
         guard words.contains("continue"), words.contains("voice"), let plan else { return }
 
-        self.plan = plan.replacingInput(with: .voiceOnly)
+        self.plan = plan.replacingInput(with: plan.input.replacingModesWithVoiceOnly())
         forcedVoiceInput = true
         statusMessage = "Continuing with voice input for all controls."
         trialPhase = .participantNumber

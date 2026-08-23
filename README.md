@@ -16,7 +16,7 @@ the target runs vertically through the middle column, so the participant says �
 
 The app opens directly into a binocular, head-locked compositor experience. Before trial 1, a visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes or no. Saying no, or anything other than yes, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin.” Each trial first shows the target number above a grid of Xs. The protocol independently selects keyboard or speech entry for the target and crossing digits. A configured Space press or spoken “stop” records the find time before the crossing number is verified. Correct/wrong feedback and automatic advancement work with either input method. Fixed-trial tasks end after the scheduled trials; time-based tasks score as many completed targets as possible before their deadline. Pressing the Digital Crown backgrounds the windowless research app, which then deliberately terminates.
 
-Spoken forms are configured under `speech.aliases` in `master_condition_template`. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must resolve to at least one alias, and one alias cannot belong to multiple digits.
+Spoken forms are configured once under `input.speech.aliases`. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must have at least one alias, and one alias cannot belong to multiple digits.
 
 ## Multi-trial configuration
 
@@ -32,7 +32,7 @@ The required root `input` section independently configures `start_digits`, `stop
 
 `countdown.stopwatch_volume` controls the looping `stopwatch.caf` sound from silence (`0`) through full amplitude (`1`) using a perceptual fader curve. The stopwatch and countdown bar run only during active search time and pause between trials. `countdown.final_gong_volume` controls `gong.caf` when the final-score prompt opens.
 
-`speech.max_interdigit_pause_seconds` is the longest permitted pause between spoken digits in a three-digit trial response. After the first or second recognized digit, the next digit must begin within this interval. If the interval expires, the partial response is forgotten and the next spoken digit starts a new attempt. It must be defined in `master_condition_template`.
+`input.speech.max_interdigit_pause_seconds` is the longest permitted pause between spoken digits in a three-digit trial response. After the first or second recognized digit, the next digit must begin within this interval. If the interval expires, the partial response is forgotten and the next spoken digit starts a new attempt. Speech settings are root-level and cannot vary by condition.
 
 Every instantiated condition requires `block_nr >= 1`. Used block numbers must begin at 1 and be consecutive without gaps. Blocks run in ascending order, and their trials are randomized within each block. Fixed-trial mode runs that schedule once. Loop-trials mode cycles the scheduled order until its deadline, reusing each trial's configured random seed on every pass. Use `"shuffle"` when you want each scheduled trial to receive a unique seed at experiment creation; use a fixed seed or a seed list when you intentionally want repeats. Trial names (`trial1`, `trial2`, …) remain unique when loop-trials mode revisits a source condition.
 
@@ -74,7 +74,8 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
     "input": {
       "start_digits": "speech",
       "stop_command": "speech_stop",
-      "cross_digits": "speech"
+      "cross_digits": "speech",
+      "speech": { "aliases": { "...": "all digits 0 through 9" }, "max_interdigit_pause_seconds": 1.0 }
     },
     "forced_voice_input": true,
     "start_date": "2026-08-14",
@@ -97,7 +98,6 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "tiles": { "...": "complete resolved tile parameters" },
         "surround": { "...": "complete resolved surround parameters" },
         "fov": { "...": "complete resolved FOV parameters" },
-        "speech": { "...": "complete resolved speech parameters" }
       },
       "seeded_stimulus": {
         "target_number": 512,
