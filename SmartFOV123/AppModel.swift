@@ -40,8 +40,6 @@ final class AppModel {
     }
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
-    private var speechPartialResetTask: Task<Void, Never>?
-    private var recognizedDigitCountInCurrentAttempt = 0
     private var keyboardDigits = ""
     private var backgroundObserverTask: Task<Void, Never>?
     private var sceneDeactivationObserverTask: Task<Void, Never>?
@@ -363,9 +361,6 @@ final class AppModel {
     }
 
     func startSpeechConfirmation() async {
-        speechPartialResetTask?.cancel()
-        speechPartialResetTask = nil
-        recognizedDigitCountInCurrentAttempt = 0
         speechRestartTask?.cancel()
         speechRestartTask = nil
         guard trialPhase != .configurationError, trialPhase != .debriefing,
@@ -419,8 +414,6 @@ final class AppModel {
     }
 
     func stopSpeechConfirmation() {
-        speechPartialResetTask?.cancel()
-        speechPartialResetTask = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         speechListener.stop()
@@ -475,25 +468,15 @@ final class AppModel {
         if trialPhase == .targetCue, plan.input.startDigits != .speech { return }
         if trialPhase == .search, plan.input.crossDigits != .speech { return }
 
-        let aliasLookup = speech.aliasLookup
-        guard let candidate = SpokenDigitParser.parseThreeDigits(
-            from: transcript,
-            aliases: aliasLookup
-        ) else {
-            if let digitCount = SpokenDigitParser.incompleteDigitCount(
-                from: transcript,
-                aliases: aliasLookup
-            ), digitCount > recognizedDigitCountInCurrentAttempt {
-                recognizedDigitCountInCurrentAttempt = digitCount
-                scheduleIncompleteSpeechReset(
-                    afterSeconds: speech.maxInterdigitPauseSeconds
-                )
-            }
+        let attemptDigits = currentSpeechDigitAttempt(
+            from: segments,
+            aliases: speech.aliasLookup,
+            maximumPauseSeconds: speech.maxInterdigitPauseSeconds
+        )
+        let candidate = String(attemptDigits.map(\.digit))
+        guard candidate.count == 3 else {
             return
         }
-        speechPartialResetTask?.cancel()
-        speechPartialResetTask = nil
-        recognizedDigitCountInCurrentAttempt = 3
         DiagnosticLog.event("speech", "three-digit candidate parsed; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase)) candidate=\(candidate)")
         handleTrialCandidate(candidate, spoken: true)
     }
@@ -688,22 +671,6 @@ final class AppModel {
         }
     }
 
-    private func scheduleIncompleteSpeechReset(afterSeconds delay: Float) {
-        speechPartialResetTask?.cancel()
-        speechPartialResetTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(
-                nanoseconds: UInt64(Double(delay) * 1_000_000_000)
-            )
-            guard !Task.isCancelled,
-                  let self,
-                  self.immersiveSpaceState == .open,
-                  self.trialPhase == .targetCue || self.trialPhase == .search else { return }
-            self.speechPartialResetTask = nil
-            self.speechListener.pauseForFeedback()
-            await self.startSpeechConfirmation()
-        }
-    }
-
     private func elapsedMilliseconds() -> UInt64 {
         elapsedMilliseconds(atUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds)
     }
@@ -748,6 +715,58 @@ final class AppModel {
             }
         }
         currentTrialMeasurement?.speech.sort { $0.startMS < $1.startMS }
+    }
+
+    private struct TimedDigit {
+        let digit: Character
+        let startUptimeNanoseconds: UInt64
+        let stopUptimeNanoseconds: UInt64
+    }
+
+    private func currentSpeechDigitAttempt(
+        from segments: [TimedSpeechSegment],
+        aliases: [String: Int],
+        maximumPauseSeconds: Float
+    ) -> [TimedDigit] {
+        let digits = segments.flatMap { segment -> [TimedDigit] in
+            let normalized = SpokenDigitParser.normalizedForStorage(
+                segment.text,
+                aliases: aliases
+            )
+            guard !normalized.isEmpty,
+                  normalized.allSatisfy(\.isNumber) else {
+                return []
+            }
+            let characters = Array(normalized)
+            let duration = segment.stopUptimeNanoseconds >= segment.startUptimeNanoseconds
+                ? segment.stopUptimeNanoseconds - segment.startUptimeNanoseconds
+                : 0
+            return characters.enumerated().map { index, digit in
+                .init(
+                    digit: digit,
+                    startUptimeNanoseconds: segment.startUptimeNanoseconds
+                        + duration * UInt64(index) / UInt64(characters.count),
+                    stopUptimeNanoseconds: segment.startUptimeNanoseconds
+                        + duration * UInt64(index + 1) / UInt64(characters.count)
+                )
+            }
+        }.sorted { $0.startUptimeNanoseconds < $1.startUptimeNanoseconds }
+
+        let maximumPauseNanoseconds = UInt64(Double(maximumPauseSeconds) * 1_000_000_000)
+        return digits.reduce(into: []) { attempt, digit in
+            guard let previous = attempt.last else {
+                attempt.append(digit)
+                return
+            }
+            let pause = digit.startUptimeNanoseconds > previous.stopUptimeNanoseconds
+                ? digit.startUptimeNanoseconds - previous.stopUptimeNanoseconds
+                : 0
+            if pause > maximumPauseNanoseconds {
+                attempt = [digit]
+            } else {
+                attempt.append(digit)
+            }
+        }
     }
 
     private func handleParticipantNumber(_ transcript: String) {
@@ -1038,8 +1057,6 @@ final class AppModel {
         timedSessionSearchStartNanoseconds = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
-        speechPartialResetTask?.cancel()
-        speechPartialResetTask = nil
         stimulusPresentationState.hide()
         do {
             try resultFileWriter.finishInterruptedExperiment(endTimeMS: elapsedMilliseconds())
