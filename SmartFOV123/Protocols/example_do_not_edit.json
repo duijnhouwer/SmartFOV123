@@ -7,9 +7,9 @@
   "foveated_rendering": true,
   "task_mode": "loop_trials_420_seconds",
   "input": {
-      "start_digits": "keyboard",
+      "start_digits": "speech",
       "stop_command": "keyboard_space",
-      "cross_digits": "keyboard"
+      "cross_digits": "speech"
   },
   "master_condition_template": {
     "random_seed": "shuffle",
@@ -74,7 +74,7 @@
         "wrong": { "file": "wrong.caf", "volume": 0.5 }
     },
     "speech": {
-      "max_interdigit_pause_seconds": 0.8,
+      "max_interdigit_pause_seconds": 1.0,
       "aliases": {
         "0": ["zero", "oh", "o"],
         "1": ["one", "won"],

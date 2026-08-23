@@ -24,6 +24,7 @@ final class ResultFileWriter {
         subjectNumber: String,
         taskMode: TaskMode,
         input: InputConfiguration,
+        forcedVoiceInput: Bool,
         startDate: Date? = nil
     ) {
         let startDate = startDate ?? now()
@@ -32,6 +33,7 @@ final class ResultFileWriter {
             subjectNumber: subjectNumber,
             taskMode: taskMode,
             input: input,
+            forcedVoiceInput: forcedVoiceInput,
             startDate: startDate
         )
         completedTrials = []
@@ -207,6 +209,7 @@ private struct ResultExperiment: Encodable {
     let subjectNumber: String
     let taskMode: String?
     let input: InputConfiguration
+    let forcedVoiceInput: Bool
     let startDate: String
     let startTime: String
     let timestamp: Date
@@ -216,12 +219,14 @@ private struct ResultExperiment: Encodable {
         subjectNumber: String,
         taskMode: TaskMode,
         input: InputConfiguration,
+        forcedVoiceInput: Bool,
         startDate: Date
     ) {
         self.protocolName = protocolName
         self.subjectNumber = subjectNumber
         self.taskMode = taskMode.durationSeconds == nil ? nil : taskMode.rawValue
         self.input = input
+        self.forcedVoiceInput = forcedVoiceInput
         timestamp = startDate
 
         let dateFormatter = DateFormatter()
@@ -245,6 +250,7 @@ private struct ResultExperiment: Encodable {
         case subjectNumber = "subject_number"
         case taskMode = "task_mode"
         case input
+        case forcedVoiceInput = "forced_voice_input"
         case startDate = "start_date"
         case startTime = "start_time"
     }
@@ -754,7 +760,7 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["experiment", "trials", "summary"]
         } else if dictionary.keys.contains("application") {
             preferredOrder = [
-                "application", "protocol_name", "subject_number", "task_mode", "input",
+                "application", "protocol_name", "subject_number", "task_mode", "input", "forced_voice_input",
                 "start_date", "start_time"
             ]
         } else if dictionary.keys.contains("duration_seconds") {

@@ -29,6 +29,10 @@ final class KeyboardInputListener {
         self.onKey = onKey
     }
 
+    static var isHardwareKeyboardConnected: Bool {
+        GCKeyboard.coalesced != nil
+    }
+
     func start() {
         let center = NotificationCenter.default
         observers.append(center.addObserver(

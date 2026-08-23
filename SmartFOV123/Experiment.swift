@@ -84,6 +84,16 @@ struct InputConfiguration: Decodable, Encodable, Sendable {
         startDigits == .speech || stopCommand == .speechStop || crossDigits == .speech
     }
 
+    var usesKeyboard: Bool {
+        startDigits == .keyboard || stopCommand == .keyboardSpace || crossDigits == .keyboard
+    }
+
+    static let voiceOnly = InputConfiguration(
+        startDigits: .speech,
+        stopCommand: .speechStop,
+        crossDigits: .speech
+    )
+
     private enum CodingKeys: String, CodingKey {
         case startDigits = "start_digits"
         case stopCommand = "stop_command"
@@ -307,6 +317,20 @@ struct ExperimentPlan: Sendable {
     /// so this option applies consistently to every trial in the plan.
     let foveatedRendering: Bool
     let trials: [ScheduledTrial]
+
+    func replacingInput(with input: InputConfiguration) -> ExperimentPlan {
+        ExperimentPlan(
+            protocolName: protocolName,
+            subjectNumberDigitCount: subjectNumberDigitCount,
+            instructions: instructions,
+            debriefingTitle: debriefingTitle,
+            debriefing: debriefing,
+            taskMode: taskMode,
+            input: input,
+            foveatedRendering: foveatedRendering,
+            trials: trials
+        )
+    }
 
     static func load(from url: URL, protocolName: String? = nil) throws -> ExperimentPlan {
         let data: Data

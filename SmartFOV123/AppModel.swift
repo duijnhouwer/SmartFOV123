@@ -15,6 +15,7 @@ final class AppModel {
     enum TrialPhase: Equatable {
         case configurationError
         case protocolSelection
+        case keyboardUnavailable
         case participantNumber
         case participantConfirmation
         case instructions
@@ -59,6 +60,7 @@ final class AppModel {
     private var hasStartedWindowlessExperience = false
     private var isAdvancingCompletedTrial = false
     private var hasTimedSessionEnded = false
+    private var forcedVoiceInput = false
     private(set) var currentTrialIndex = 0
     private(set) var completedTargetCount = 0
     private(set) var subjectNumber: String?
@@ -95,7 +97,7 @@ final class AppModel {
         switch trialPhase {
         case .transitioning, .targetCue, .search:
             return configuredPassthroughDimming
-        case .configurationError, .protocolSelection, .participantNumber,
+        case .configurationError, .protocolSelection, .keyboardUnavailable, .participantNumber,
              .participantConfirmation, .instructions, .debriefing:
             return 0
         }
@@ -131,6 +133,12 @@ final class AppModel {
                 title: "SmartFOV123",
                 message: "\(names)\n\nSpeak number of protocol to run",
                 usesLeadingAlignment: true
+            )
+        case .keyboardUnavailable:
+            return .init(
+                title: "Keyboard Required",
+                message: "The protocol calls for keyboard input, but no hardware keyboard is connected. Please exit, connect an Apple Magic Keyboard or another compatible hardware keyboard, and try again. Or continue with voice override.\n\nPress the Digital Crown to exit,\nor speak “Continue with voice”.",
+                usesLeadingAlignment: false
             )
         case .participantNumber:
             let digitCount = plan?.subjectNumberDigitCount ?? 3
@@ -377,6 +385,8 @@ final class AppModel {
             switch trialPhase {
             case .protocolSelection:
                 statusMessage = "Listening for a protocol number."
+            case .keyboardUnavailable:
+                statusMessage = "Say “Continue with voice” to override keyboard input."
             case .participantNumber:
                 let digitCount = plan?.subjectNumberDigitCount ?? 3
                 statusMessage = "Listening for the \(digitCount)-digit participant number."
@@ -426,9 +436,14 @@ final class AppModel {
             handleProtocolSelection(transcript)
             return
         }
+        if trialPhase == .keyboardUnavailable {
+            handleVoiceInputOverride(transcript)
+            return
+        }
         guard let experiment else { return }
         switch trialPhase {
-        case .configurationError, .protocolSelection, .debriefing, .transitioning:
+        case .configurationError, .protocolSelection, .keyboardUnavailable,
+             .debriefing, .transitioning:
             return
         case .participantNumber:
             handleParticipantNumber(transcript, experiment: experiment)
@@ -648,6 +663,8 @@ final class AppModel {
             statusMessage = "Speech recognition paused: \(error.localizedDescription) Retrying…"
         } else if trialPhase == .protocolSelection {
             statusMessage = "I didn't catch a protocol number. Listening again…"
+        } else if trialPhase == .keyboardUnavailable {
+            statusMessage = "I didn't catch “Continue with voice”. Listening again…"
         } else if trialPhase == .participantConfirmation {
             statusMessage = "I didn't catch yes or no. Listening again…"
         } else if trialPhase == .instructions {
@@ -755,6 +772,7 @@ final class AppModel {
         let selected = availablePlans[selection - 1]
 
         plan = selected
+        forcedVoiceInput = false
         statusMessage = "Selected protocol \(selected.protocolName)."
         speechListener.stop()
         Task { @MainActor [weak self] in
@@ -763,10 +781,29 @@ final class AppModel {
                 self.showConfigurationError("The selected protocol has no scheduled trial.")
                 return
             }
-            self.trialPhase = .participantNumber
+            if selected.input.usesKeyboard,
+               !KeyboardInputListener.isHardwareKeyboardConnected {
+                self.trialPhase = .keyboardUnavailable
+                self.statusMessage = "No hardware keyboard is connected."
+            } else {
+                self.trialPhase = .participantNumber
+            }
             self.synchronizeParticipantPresentation()
             await self.startSpeechConfirmation()
         }
+    }
+
+    private func handleVoiceInputOverride(_ transcript: String) {
+        let words = Set(transcript.lowercased().split { !$0.isLetter }.map(String.init))
+        guard words.contains("continue"), words.contains("voice"), let plan else { return }
+
+        self.plan = plan.replacingInput(with: .voiceOnly)
+        forcedVoiceInput = true
+        statusMessage = "Continuing with voice input for all controls."
+        trialPhase = .participantNumber
+        synchronizeParticipantPresentation()
+        speechListener.stop()
+        scheduleSpeechRestart(afterNanoseconds: 250_000_000)
     }
 
     private static func normalizedProtocolSelection(_ value: String) -> String {
@@ -830,7 +867,8 @@ final class AppModel {
             protocolName: plan.protocolName,
             subjectNumber: subjectNumber,
             taskMode: plan.taskMode,
-            input: plan.input
+            input: plan.input,
+            forcedVoiceInput: forcedVoiceInput
         )
         hasExperimentBegun = true
         speechListener.stop()

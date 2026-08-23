@@ -71,6 +71,12 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
     "protocol_name": "example",
     "subject_number": "007",
     "task_mode": "loop_trials_300_seconds",
+    "input": {
+      "start_digits": "speech",
+      "stop_command": "speech_stop",
+      "cross_digits": "speech"
+    },
+    "forced_voice_input": true,
     "start_date": "2026-08-14",
     "start_time": "13:01:56-04:00"
   },
@@ -123,7 +129,7 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
 }
 ```
 
-The `experiment` block records the application, configured protocol, confirmed participant number, and local experiment-start date and time in ISO 8601-compatible forms. Loop-trials files also record `task_mode`; all files record the resolved root `input` configuration. The participant number is a string so leading zeroes are preserved. Each trial has its unique name and a complete `definition` containing the source condition's 1-based `condition_nr`, concrete block and actual random seed, and every resolved parameter section. `seeded_stimulus` records the generated target, expected response, and grid. `results.absolute_start_time_ms` retains the trial start's monotonic milliseconds since app launch. Every other time in that trial's `results` block is a signed number of milliseconds relative to that start, including input events recorded before the target/start command; negative values are preserved. Digit aliases are normalized in speech events. Apple Speech cannot log audio it never recognizes. Session-summary timing remains session-level.
+The `experiment` block records the application, configured protocol, confirmed participant number, and local experiment-start date and time in ISO 8601-compatible forms. Loop-trials files also record `task_mode`; all files record the resolved root `input` configuration. If a selected protocol requires a keyboard but none is connected, the participant can speak “Continue with voice”; the app replaces the complete input configuration with its all-speech equivalent before trials begin and records `forced_voice_input: true` (otherwise `false`). The participant number is a string so leading zeroes are preserved. Each trial has its unique name and a complete `definition` containing the source condition's 1-based `condition_nr`, concrete block and actual random seed, and every resolved parameter section. `seeded_stimulus` records the generated target, expected response, and grid. `results.absolute_start_time_ms` retains the trial start's monotonic milliseconds since app launch. Every other time in that trial's `results` block is a signed number of milliseconds relative to that start, including input events recorded before the target/start command; negative values are preserved. Digit aliases are normalized in speech events. Apple Speech cannot log audio it never recognizes. Session-summary timing remains session-level.
 
 Scalar arrays, grid rows, and speech detections are formatted horizontally. No template resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
 
