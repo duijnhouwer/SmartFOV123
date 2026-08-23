@@ -23,6 +23,7 @@ final class ResultFileWriter {
         protocolName: String,
         subjectNumber: String,
         taskMode: TaskMode,
+        input: InputConfiguration,
         startDate: Date? = nil
     ) {
         let startDate = startDate ?? now()
@@ -30,6 +31,7 @@ final class ResultFileWriter {
             protocolName: protocolName,
             subjectNumber: subjectNumber,
             taskMode: taskMode,
+            input: input,
             startDate: startDate
         )
         completedTrials = []
@@ -204,6 +206,7 @@ private struct ResultExperiment: Encodable {
     let protocolName: String
     let subjectNumber: String
     let taskMode: String?
+    let input: InputConfiguration
     let startDate: String
     let startTime: String
     let timestamp: Date
@@ -212,11 +215,13 @@ private struct ResultExperiment: Encodable {
         protocolName: String,
         subjectNumber: String,
         taskMode: TaskMode,
+        input: InputConfiguration,
         startDate: Date
     ) {
         self.protocolName = protocolName
         self.subjectNumber = subjectNumber
         self.taskMode = taskMode.durationSeconds == nil ? nil : taskMode.rawValue
+        self.input = input
         timestamp = startDate
 
         let dateFormatter = DateFormatter()
@@ -239,27 +244,118 @@ private struct ResultExperiment: Encodable {
         case protocolName = "protocol_name"
         case subjectNumber = "subject_number"
         case taskMode = "task_mode"
+        case input
         case startDate = "start_date"
         case startTime = "start_time"
     }
 }
 
 struct CompletedTrialResults: Encodable {
-    let startTimeMS: UInt64
-    let digitRevealMS: UInt64
-    let targetFoundMS: UInt64
+    let absoluteStartTimeMS: UInt64
+    let digitRevealMS: Int64
+    let stopSignalStartMS: Int64
+    let answerCorrect: Bool
     let speech: [SpeechDetection]
+    let keyboard: [KeyboardDetection]
+
+    init(
+        startTimeMS: UInt64,
+        digitRevealMS: UInt64,
+        stopSignalStartMS: UInt64,
+        answerCorrect: Bool,
+        speech: [SpeechDetection],
+        keyboard: [KeyboardDetection]
+    ) {
+        absoluteStartTimeMS = startTimeMS
+        let signedStartTimeMS = Int64(startTimeMS)
+        self.digitRevealMS = Int64(digitRevealMS) - signedStartTimeMS
+        self.stopSignalStartMS = Int64(stopSignalStartMS) - signedStartTimeMS
+        self.answerCorrect = answerCorrect
+        self.speech = speech.map {
+            .init(
+                id: $0.id,
+                token: $0.token,
+                startMS: $0.startMS - signedStartTimeMS,
+                stopMS: $0.stopMS - signedStartTimeMS
+            )
+        }
+        self.keyboard = keyboard.map {
+            .init(
+                key: $0.key,
+                startMS: $0.startMS - signedStartTimeMS
+            )
+        }
+    }
 
     struct SpeechDetection: Encodable {
-        let utterance: String
-        let ms: UInt64
+        let id: String
+        let token: String
+        let startMS: Int64
+        let stopMS: Int64
+
+        func encode(to encoder: Encoder) throws {
+            var outer = encoder.container(keyedBy: DynamicCodingKey.self)
+            try outer.encode(
+                SpeechTiming(startMS: startMS, stopMS: stopMS),
+                forKey: .init(token)
+            )
+        }
+    }
+
+    struct KeyboardDetection: Encodable {
+        let key: String
+        let startMS: Int64
+
+        func encode(to encoder: Encoder) throws {
+            var outer = encoder.container(keyedBy: DynamicCodingKey.self)
+            try outer.encode(
+                KeyboardTiming(startMS: startMS),
+                forKey: .init(key)
+            )
+        }
+    }
+
+    private struct SpeechTiming: Encodable {
+        let startMS: Int64
+        let stopMS: Int64
+
+        private enum CodingKeys: String, CodingKey {
+            case startMS = "start_ms"
+            case stopMS = "stop_ms"
+        }
+    }
+
+    private struct KeyboardTiming: Encodable {
+        let startMS: Int64
+
+        private enum CodingKeys: String, CodingKey {
+            case startMS = "start_ms"
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case speech
-        case startTimeMS = "start_time_ms"
+        case speech, keyboard
+        case absoluteStartTimeMS = "absolute_start_time_ms"
         case digitRevealMS = "digit_reveal_ms"
-        case targetFoundMS = "target_found_ms"
+        case stopSignalStartMS = "stop_signal_start_ms"
+        case answerCorrect = "answer_correct"
+    }
+}
+
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init(_ stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(stringValue: String) {
+        self.init(stringValue)
+    }
+
+    init?(intValue: Int) {
+        return nil
     }
 }
 
@@ -319,7 +415,7 @@ private struct CompletedTrial: Encodable {
         let passthroughDimming: Double
         let digits: Digits
         let annotation: Annotation
-        let timer: Timer
+        let countdown: Countdown
         let feedbackSounds: FeedbackSounds
         let tiles: Tiles
         let surround: Surround
@@ -338,7 +434,8 @@ private struct CompletedTrial: Encodable {
                 fontName: stimulus.digitFontName,
                 rgb: stimulus.digitRGB.array,
                 randomMethod: stimulus.digitRandomMethod.rawValue,
-                highlightRGB: stimulus.digitHighlightRGB.array,
+                highlightCorrectRGB: stimulus.digitHighlightCorrectRGB.array,
+                highlightWrongRGB: stimulus.digitHighlightWrongRGB.array,
                 highlightFont: stimulus.digitHighlightFontName
             )
             annotation = .init(
@@ -346,8 +443,8 @@ private struct CompletedTrial: Encodable {
                 fontName: stimulus.annotationFontName,
                 fontRGB: stimulus.annotationFontRGB.array
             )
-            timer = .init(
-                sausage: .init(
+            countdown = .init(
+                bar: .init(
                     fillRGB: stimulus.timeBarFillRGB.array,
                     heightDegrees: stimulus.timeBarHeightArcmin / 60,
                     cornerRadiusDegrees: stimulus.timeBarCornerRadiusArcmin / 60,
@@ -355,12 +452,7 @@ private struct CompletedTrial: Encodable {
                     backHeightDegrees: stimulus.timeBarBackHeightArcmin / 60,
                     backCornerRadiusDegrees: stimulus.timeBarBackCornerRadiusArcmin / 60
                 ),
-                metronome: .init(
-                    minimumBeatsPerMinute: stimulus.metronomeMinimumBeatsPerMinute,
-                    maximumBeatsPerMinute: stimulus.metronomeMaximumBeatsPerMinute,
-                    incrementIntervalBeats: stimulus.metronomeIncrementIntervalBeats,
-                    volume: stimulus.metronomeVolume
-                ),
+                stopwatchVolume: stimulus.stopwatchVolume,
                 finalGongVolume: stimulus.finalGongVolume
             )
             feedbackSounds = .init(
@@ -409,7 +501,7 @@ private struct CompletedTrial: Encodable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case digits, annotation, timer, tiles, surround, fov, speech
+            case digits, annotation, countdown, tiles, surround, fov, speech
             case feedbackSounds = "feedback_sounds"
             case conditionNumber = "condition_nr"
             case blockNumber = "block_nr"
@@ -423,7 +515,8 @@ private struct CompletedTrial: Encodable {
         let fontName: String
         let rgb: [Float]
         let randomMethod: String
-        let highlightRGB: [Float]
+        let highlightCorrectRGB: [Float]
+        let highlightWrongRGB: [Float]
         let highlightFont: String
 
         private enum CodingKeys: String, CodingKey {
@@ -431,7 +524,8 @@ private struct CompletedTrial: Encodable {
             case heightDegrees = "height_degrees"
             case fontName = "font_name"
             case randomMethod = "random_method"
-            case highlightRGB = "highlight_rgb"
+            case highlightCorrectRGB = "highlight_correct_rgb"
+            case highlightWrongRGB = "highlight_wrong_rgb"
             case highlightFont = "highlight_font"
         }
     }
@@ -448,7 +542,7 @@ private struct CompletedTrial: Encodable {
         }
     }
 
-    struct TimerSausage: Encodable {
+    struct CountdownBar: Encodable {
         let fillRGB: [Float]
         let heightDegrees: Float
         let cornerRadiusDegrees: Float
@@ -466,13 +560,14 @@ private struct CompletedTrial: Encodable {
         }
     }
 
-    struct Timer: Encodable {
-        let sausage: TimerSausage
-        let metronome: Metronome
+    struct Countdown: Encodable {
+        let bar: CountdownBar
+        let stopwatchVolume: Float
         let finalGongVolume: Float
 
         private enum CodingKeys: String, CodingKey {
-            case sausage, metronome
+            case bar
+            case stopwatchVolume = "stopwatch_volume"
             case finalGongVolume = "final_gong_volume"
         }
     }
@@ -485,20 +580,6 @@ private struct CompletedTrial: Encodable {
     struct FeedbackSounds: Encodable {
         let correct: FeedbackSound
         let wrong: FeedbackSound
-    }
-
-    struct Metronome: Encodable {
-        let minimumBeatsPerMinute: Int
-        let maximumBeatsPerMinute: Int
-        let incrementIntervalBeats: Int
-        let volume: Float
-
-        private enum CodingKeys: String, CodingKey {
-            case minimumBeatsPerMinute = "min_beats_per_minute"
-            case maximumBeatsPerMinute = "max_beats_per_minute"
-            case incrementIntervalBeats = "increment_interval_beats"
-            case volume
-        }
     }
 
     struct Tiles: Encodable {
@@ -673,7 +754,7 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["experiment", "trials", "summary"]
         } else if dictionary.keys.contains("application") {
             preferredOrder = [
-                "application", "protocol_name", "subject_number", "task_mode",
+                "application", "protocol_name", "subject_number", "task_mode", "input",
                 "start_date", "start_time"
             ]
         } else if dictionary.keys.contains("duration_seconds") {
@@ -682,26 +763,26 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_nr") {
             preferredOrder = [
-                "condition_nr", "block_nr", "random_seed", "passthrough_dimming", "digits", "annotation", "timer", "feedback_sounds",
+                "condition_nr", "block_nr", "random_seed", "passthrough_dimming", "digits", "annotation", "countdown", "feedback_sounds",
                 "tiles", "surround", "fov", "speech"
             ]
-        } else if dictionary.keys.contains("metronome") {
-            preferredOrder = ["sausage", "metronome", "final_gong_volume"]
-        } else if dictionary.keys.contains("min_beats_per_minute") {
-            preferredOrder = ["min_beats_per_minute", "max_beats_per_minute", "increment_interval_beats", "volume"]
+        } else if dictionary.keys.contains("stopwatch_volume") {
+            preferredOrder = ["bar", "stopwatch_volume", "final_gong_volume"]
+        } else if dictionary.keys.contains("start_digits") {
+            preferredOrder = ["start_digits", "stop_command", "cross_digits"]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
-        } else if dictionary.keys.contains("start_time_ms") {
-            preferredOrder = ["start_time_ms", "digit_reveal_ms", "target_found_ms", "speech"]
-        } else if dictionary.keys.contains("utterance") {
-            preferredOrder = ["utterance", "ms"]
+        } else if dictionary.keys.contains("absolute_start_time_ms") {
+            preferredOrder = ["absolute_start_time_ms", "digit_reveal_ms", "stop_signal_start_ms", "answer_correct", "speech", "keyboard"]
+        } else if dictionary.keys.contains("start_ms") {
+            preferredOrder = ["start_ms", "stop_ms"]
         } else if dictionary.keys.contains("back_height_degrees") {
             preferredOrder = [
                 "fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb",
                 "back_height_degrees", "back_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("font_name") {
-            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method", "highlight_rgb", "highlight_font"]
+            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "highlight_font"]
         } else if dictionary.keys.contains("number_horizontal") {
             preferredOrder = [
                 "width_degrees", "height_degrees", "gutter_degrees", "corner_radius_degrees",

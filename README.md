@@ -14,13 +14,13 @@ For example, if the target is `536` and the grid contains:
 
 the target runs vertically through the middle column, so the participant says “seven, three, eight.” Target placement always leaves room for this three-cell crossing, which means target centers never occur on a grid edge. The generator accepts a grid only when both the target number and its perpendicular confirmation number occur exactly once across all horizontal and vertical three-digit sequences.
 
-The app opens directly into a binocular, head-locked compositor experience. Before trial 1, a visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes or no. Saying no, or anything other than yes, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin.” Each trial first shows the target number above a grid of Xs. Reading the target aloud reveals the grid digits. The app accepts digit-by-digit or normal-number transcriptions for the perpendicular confirmation sequence and plays the bundled correct/wrong cue. Repeating the target while searching is silently ignored. A correct response advances automatically. Fixed-trial tasks end after the scheduled trials; time-based tasks score as many completed targets as possible before their deadline. Pressing the Digital Crown backgrounds the windowless research app, which then deliberately terminates.
+The app opens directly into a binocular, head-locked compositor experience. Before trial 1, a visionOS glass card collects a participant number using the configured digit count and asks for spoken confirmation with yes or no. Saying no, or anything other than yes, returns to number entry. After confirmation, the card shows the protocol instructions and waits for “Begin.” Each trial first shows the target number above a grid of Xs. The protocol independently selects keyboard or speech entry for the target and crossing digits. A configured Space press or spoken “stop” records the find time before the crossing number is verified. Correct/wrong feedback and automatic advancement work with either input method. Fixed-trial tasks end after the scheduled trials; time-based tasks score as many completed targets as possible before their deadline. Pressing the Digital Crown backgrounds the windowless research app, which then deliberately terminates.
 
 Spoken forms are configured under `speech.aliases` in `master_condition_template`. Add a lowercase, single-word alias there to handle a recurring transcription such as `dree` for `3`. Every digit from `0` through `9` must resolve to at least one alias, and one alias cannot belong to multiple digits.
 
 ## Multi-trial configuration
 
-Schema version 6 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, nonempty `instructions`, `debriefing_title`, and `debriefing` text, and `task_mode`. Use `"fixed_number_of_trials"` for the original behavior or `"loop_trials_<seconds>_seconds"`—for example, `"loop_trials_300_seconds"`—to loop the specified schedule for a positive integer countdown. Instructions may optionally contain `<TIMER_SECONDS>`, which resolves to the parsed duration in timed mode and `unlimited` in fixed-trial mode. `foveated_rendering` defaults to `true` and is disabled only when explicitly set to `false`. The protocol name is copied into every result file; the other fields control participant-number collection and the participant cards. `<NUMBER_OF_TARGETS_FOUND>` in the debriefing is replaced with the final score. `master_condition_template` must define every stimulus parameter and `random_seed`; it is not scheduled and therefore cannot contain `repeats` or `block_nr`. Each element of `conditions` implicitly inherits the master, must explicitly define positive `repeats` and `block_nr`, and may override any nested parameter. `passthrough_dimming` is a finite value from 0 through 1 that dims the mixed-reality surroundings during trials: `0` preserves unaltered passthrough and `1` produces maximum dimming/black. It can be set in the master condition and overridden by a condition. Dimming remains off during protocol selection, participant-number entry and confirmation, instructions, configuration errors, and debriefing. `fov.zoomed_width_degrees` and `fov.zoomed_height_degrees` set the final angular size of the complete stimulus independently around its unchanged configured offset; texture resolution scales with the required planar enlargement so zooming retains detail. `timer.sausage` defines the countdown fill and stationary background, including independent `corner_radius_degrees` and `back_corner_radius_degrees`. The full fill has rounded ends; as time elapses, its right side is cropped to a straight moving edge while the left end remains rounded. `timer.metronome` defines equal-length `start_seconds` and `beats_per_minute` arrays; each start time begins its corresponding tempo stage, and `final_gong` optionally plays `gong.caf` when the final-score prompt opens.
+Schema version 9 uses snake_case property names and enum values. The root protocol fields include a nonempty `protocol_name`, `subject_number_digit_count` from 1 through 12, nonempty `instructions`, `debriefing_title`, and `debriefing` text, and `task_mode`. Use `"fixed_number_of_trials"` for the original behavior or `"loop_trials_<seconds>_seconds"`—for example, `"loop_trials_300_seconds"`—to loop the specified schedule for a positive integer countdown. Instructions may optionally contain `<TIMER_SECONDS>`, which resolves to the parsed duration in timed mode and `unlimited` in fixed-trial mode. `foveated_rendering` defaults to `true` and is disabled only when explicitly set to `false`. The protocol name is copied into every result file; the other fields control participant-number collection and the participant cards. `<NUMBER_OF_TARGETS_FOUND>` in the debriefing is replaced with the final score. `master_condition_template` must define every stimulus parameter and `random_seed`; it is not scheduled and therefore cannot contain `repeats` or `block_nr`. Each element of `conditions` implicitly inherits the master, must explicitly define positive `repeats` and `block_nr`, and may override any nested parameter. `passthrough_dimming` is a finite value from 0 through 1 that dims the mixed-reality surroundings during trials: `0` preserves unaltered passthrough and `1` produces maximum dimming/black. It can be set in the master condition and overridden by a condition. Dimming remains off during protocol selection, participant-number entry and confirmation, instructions, configuration errors, and debriefing. `fov.zoomed_width_degrees` and `fov.zoomed_height_degrees` set the final angular size of the complete stimulus independently around its unchanged configured offset; texture resolution scales with the required planar enlargement so zooming retains detail. `countdown.bar` defines the countdown fill and stationary background, including independent `corner_radius_degrees` and `back_corner_radius_degrees`. The full fill has rounded ends; as time elapses, its right side is cropped to a straight moving edge while the left end remains rounded.
 
 `random_seed` accepts:
 
@@ -28,7 +28,9 @@ Schema version 6 uses snake_case property names and enum values. The root protoc
 - One unsigned integer, reused for every repetition.
 - An unsigned-integer array whose length must equal `repeats`.
 
-Negative `timer.metronome.start_seconds` values disable their paired BPM stages; setting every start negative suppresses the metronome. `timer.metronome.volume` controls the peak-normalized tick and tock assets from silence (`0`) through full amplitude (`1`) using a perceptual fader curve; the configured value itself is preserved in results. `timer.final_gong` controls whether `gong.caf` plays when the final-score prompt opens.
+The required root `input` section independently configures `start_digits`, `stop_command`, and `cross_digits`. The digit fields accept only `keyboard` or `speech`; `stop_command` accepts only `keyboard_space` or `speech_stop`. Keyboard digit input is intentionally invisible: digits append to a three-character buffer, Delete/Backspace removes its last digit, and Enter submits only when exactly three digits are buffered. Auto-repeat key-down callbacks are ignored until the physical key is released, so holding a key produces one input and one log event. Space or the standalone spoken word “stop” records `stop_signal_start_ms` and pauses the countdown. The first crossing code submitted afterward is final: it records `answer_correct` from `cross_digits`, plays the matching feedback sound, uses `digits.highlight_correct_rgb` or `digits.highlight_wrong_rgb`, and advances without a retry. When all three trial inputs use the keyboard, speech recognition is stopped for the trial phases.
+
+`countdown.stopwatch_volume` controls the looping `stopwatch.caf` sound from silence (`0`) through full amplitude (`1`) using a perceptual fader curve. The stopwatch and countdown bar run only during active search time and pause between trials. `countdown.final_gong_volume` controls `gong.caf` when the final-score prompt opens.
 
 `speech.max_interdigit_pause_seconds` is the longest permitted pause between spoken digits in a three-digit trial response. After the first or second recognized digit, the next digit must begin within this interval. If the interval expires, the partial response is forgotten and the next spoken digit starts a new attempt. It must be defined in `master_condition_template`.
 
@@ -46,7 +48,7 @@ Grid generation happens when each trial is about to run. The target is drawn fir
 2. In **Signing & Capabilities**, select your Personal Team.
 3. Pair the headset, enable Developer Mode, and select it as the run destination.
 4. Build and run.
-5. Verify that an X grid and unboxed target appear, read the target to reveal the digits, then say the three crossing digits and confirm that the next trial starts automatically.
+5. Verify the target-entry, stop-command, and crossing-entry methods selected by the protocol, and confirm that a correct crossing number advances automatically.
 
 The app targets visionOS 26.0 or later. Speech recognition uses Apple's Speech framework and prefers on-device recognition when the active recognizer supports it.
 
@@ -81,9 +83,10 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "random_seed": 123,
         "digits": { "...": "complete resolved digit parameters" },
         "annotation": { "...": "complete resolved annotation parameters" },
-        "timer": {
-          "sausage": { "...": "complete resolved countdown-sausage parameters" },
-          "metronome": { "...": "complete resolved tempo progression" }
+        "countdown": {
+          "bar": { "...": "complete resolved countdown-bar parameters" },
+          "stopwatch_volume": 0.25,
+          "final_gong_volume": 0.5
         },
         "tiles": { "...": "complete resolved tile parameters" },
         "surround": { "...": "complete resolved surround parameters" },
@@ -97,10 +100,18 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
         "grid": [[4, 5, 7, 9], [6, 4, 6, 8], [2, 5, 1, 2], [8, 0, 3, 4]]
       },
       "results": {
-        "start_time_ms": 1204,
-        "digit_reveal_ms": 4839,
-        "target_found_ms": 12751,
-        "speech": [{"utterance": "512", "ms": 4817}, {"utterance": "613", "ms": 12751}]
+        "absolute_start_time_ms": 1204,
+        "digit_reveal_ms": 3635,
+        "stop_signal_start_ms": 11547,
+        "answer_correct": true,
+        "speech": [
+          {"stop": {"start_ms": 11547, "stop_ms": 11798}},
+          {"6": {"start_ms": 12006, "stop_ms": 12101}}
+        ],
+        "keyboard": [
+          {"1": {"start_ms": 3613}},
+          {"enter": {"start_ms": 3686}}
+        ]
       }
     }
   ],
@@ -112,7 +123,7 @@ The file is always valid JSON. Its `trials` array grows after each completed tri
 }
 ```
 
-The `experiment` block records the application, configured protocol, confirmed participant number, and local experiment-start date and time in ISO 8601-compatible forms. Loop-trials files also record `task_mode`. The participant number is a string so leading zeroes are preserved. Each trial has its unique name and a complete `definition` containing the source condition's 1-based `condition_nr`, concrete block and actual random seed, and every resolved parameter section. `repeats` is omitted because it has no meaning in a completed-trial record. `seeded_stimulus` records the generated target, its `leftright` or `topdown` orientation, the expected response, and the displayed grid as rows of integer digits. `results` records monotonic integer milliseconds since app launch for the trial start, digit reveal, and correct response, plus every transcript that successfully parsed as three digits and its detection time. Speech aliases are replaced with their configured digits before storage, and an entirely numeric result is collapsed without spaces (`Free 56` becomes `356` when `free` maps to `3`). Words without a configured mapping remain visible in the stored utterance. At a loop-trials deadline, `summary` records the final score, configured duration, and end time, even when no target was completed. These timestamps intentionally provide practical event timing rather than millisecond measurement precision.
+The `experiment` block records the application, configured protocol, confirmed participant number, and local experiment-start date and time in ISO 8601-compatible forms. Loop-trials files also record `task_mode`; all files record the resolved root `input` configuration. The participant number is a string so leading zeroes are preserved. Each trial has its unique name and a complete `definition` containing the source condition's 1-based `condition_nr`, concrete block and actual random seed, and every resolved parameter section. `seeded_stimulus` records the generated target, expected response, and grid. `results.absolute_start_time_ms` retains the trial start's monotonic milliseconds since app launch. Every other time in that trial's `results` block is a signed number of milliseconds relative to that start, including input events recorded before the target/start command; negative values are preserved. Digit aliases are normalized in speech events. Apple Speech cannot log audio it never recognizes. Session-summary timing remains session-level.
 
 Scalar arrays, grid rows, and speech detections are formatted horizontally. No template resolution is needed to interpret the result. The app rewrites the document atomically, and a trial advances only after the updated JSON is written successfully.
 

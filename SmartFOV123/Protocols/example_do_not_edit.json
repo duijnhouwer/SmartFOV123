@@ -1,11 +1,16 @@
 {
-  "schema_version": 6,
+  "schema_version": 9,
   "subject_number_digit_count": 3,
-  "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, read the target number aloud to reveal the digits. Then search for the target.\n\nOnce you find it, read the three-digit number that crosses its middle digit.\n\nNumbers must be spoken one digit at time.\n\nThe next target appears automatically after a correct response.\n\nFind as many targets as you can before the <TIMER_SECONDS>-second timer runs out.",
+  "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, type the target number and press Enter to reveal the digits. Then search for the target.\n\nPress Space as soon as you find it; this stops the timer. Then type the three-digit number that crosses its middle digit and press Enter.\n\nDelete corrects the most recently typed digit. Keyboard input is not displayed.\n\nThe next target appears automatically after a correct response.\n\nFind as many targets as you can before the <TIMER_SECONDS>-second timer runs out.",
   "debriefing_title": "Time's up!",
   "debriefing": "Your score is <NUMBER_OF_TARGETS_FOUND>. Well done!\n\nPress the Digital Crown to exit",
   "foveated_rendering": true,
-  "task_mode": "loop_trials_600_seconds",
+  "task_mode": "loop_trials_420_seconds",
+  "input": {
+      "start_digits": "keyboard",
+      "stop_command": "keyboard_space",
+      "cross_digits": "keyboard"
+  },
   "master_condition_template": {
     "random_seed": "shuffle",
     "passthrough_dimming": 0.0,
@@ -14,7 +19,8 @@
       "font_name": "Arial",
       "rgb": [0, 0, 0],
       "random_method": "flat_distribution",
-      "highlight_rgb": [1, 0, 0],
+      "highlight_correct_rgb": [0, 1, 0],
+      "highlight_wrong_rgb": [1, 0, 0],
       "highlight_font": "Arial Bold"
     },
     "fov": {
@@ -51,8 +57,8 @@
       "font_name": "Arial",
       "font_rgb": [0, 0, 0]
     },
-    "timer": {
-        "sausage": {
+    "countdown": {
+        "bar": {
             "fill_rgb": [1, 1, 1],
             "height_degrees": 0.5,
             "corner_radius_degrees": 0.25,
@@ -60,12 +66,7 @@
             "back_height_degrees": 1.0,
             "back_corner_radius_degrees": 0.5
         },
-        "metronome": {
-            "min_beats_per_minute": 60,
-            "max_beats_per_minute": 140,
-            "increment_interval_beats": 40,
-            "volume": 0.25
-        },
+        "stopwatch_volume": 0.25,
         "final_gong_volume": 0.5
     },
     "feedback_sounds": {

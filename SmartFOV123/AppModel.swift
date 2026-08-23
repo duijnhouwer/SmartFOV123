@@ -1,4 +1,5 @@
 import Dispatch
+import Darwin
 import Observation
 import UIKit
 
@@ -29,18 +30,25 @@ final class AppModel {
     private(set) var plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
     private let feedbackSoundPlayer = FeedbackSoundPlayer()
-    private let metronomePlayer = MetronomePlayer()
+    private let countdownAudioPlayer = CountdownAudioPlayer()
     private let resultFileWriter = ResultFileWriter()
     private let speechListener = SpeechConfirmationListener()
+    @ObservationIgnored
+    private lazy var keyboardInputListener = KeyboardInputListener { [weak self] key in
+        self?.handleExperimentKey(key)
+    }
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
     private var speechPartialResetTask: Task<Void, Never>?
     private var recognizedDigitCountInCurrentAttempt = 0
+    private var keyboardDigits = ""
     private var backgroundObserverTask: Task<Void, Never>?
     private var sceneDeactivationObserverTask: Task<Void, Never>?
     private var sceneActivationObserverTask: Task<Void, Never>?
     private var foregroundObserverTask: Task<Void, Never>?
     private var timedSessionTask: Task<Void, Never>?
+    private var timedSessionElapsedNanoseconds: UInt64 = 0
+    private var timedSessionSearchStartNanoseconds: UInt64?
     private var timedSessionFinalGongVolume: Float = 0
     private var instantiatedExperiment: Experiment?
     private var preparedTrialRevision: Int?
@@ -262,11 +270,11 @@ final class AppModel {
         DiagnosticLog.event("lifecycle", "windowless experience starting")
         backgroundObserverTask = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(
-                named: UIScene.didEnterBackgroundNotification
+                named: UIApplication.didEnterBackgroundNotification
             ) {
                 guard let self else { return }
-                DiagnosticLog.event("lifecycle", "UIScene.didEnterBackground received")
-                self.prepareForBackground()
+                DiagnosticLog.event("lifecycle", "UIApplication.didEnterBackground received")
+                self.terminateWhenBackgrounded()
             }
         }
         sceneDeactivationObserverTask = Task { @MainActor [weak self] in
@@ -310,6 +318,7 @@ final class AppModel {
 
     private func startWindowlessExperience() async {
         DiagnosticLog.event("app", "immersive startup begin")
+        keyboardInputListener.start()
         immersiveSpaceState = .inTransition
 
         if plan != nil, !(await prepareCurrentTrial()) {
@@ -351,13 +360,14 @@ final class AppModel {
         recognizedDigitCountInCurrentAttempt = 0
         speechRestartTask?.cancel()
         speechRestartTask = nil
-        guard trialPhase != .configurationError, trialPhase != .debriefing else { return }
+        guard trialPhase != .configurationError, trialPhase != .debriefing,
+              shouldUseSpeech(in: trialPhase) else { return }
         DiagnosticLog.event("speech", "recognition start requested; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase))")
 
         do {
             try await speechListener.start(
-                onTranscription: { [weak self] transcript in
-                    self?.handleTranscript(transcript)
+                onTranscription: { [weak self] transcript, segments in
+                    self?.handleTranscript(transcript, segments: segments)
                 },
                 onEnded: { [weak self] error in
                     self?.handleRecognitionEnded(error)
@@ -406,7 +416,10 @@ final class AppModel {
         speechListener.stop()
     }
 
-    private func handleTranscript(_ transcript: String) {
+    private func handleTranscript(
+        _ transcript: String,
+        segments: [TimedSpeechSegment] = []
+    ) {
         guard immersiveSpaceState == .open else { return }
 
         if trialPhase == .protocolSelection {
@@ -430,6 +443,21 @@ final class AppModel {
             break
         }
 
+        mergeSpeechSegments(segments, aliases: experiment.configuration.speech.aliasLookup)
+
+        if trialPhase == .search,
+           plan?.input.stopCommand == .speechStop,
+           let stopSegment = segments.first(where: {
+               $0.text.lowercased().split(whereSeparator: { !$0.isLetter }).contains("stop")
+           }) {
+            stopSearchTimer(atMS: elapsedMilliseconds(atUptimeNanoseconds: stopSegment.startUptimeNanoseconds))
+            speechListener.pauseForFeedback()
+            scheduleSpeechRestart(afterNanoseconds: 250_000_000)
+            return
+        }
+        if trialPhase == .targetCue, plan?.input.startDigits != .speech { return }
+        if trialPhase == .search, plan?.input.crossDigits != .speech { return }
+
         let aliasLookup = experiment.configuration.speech.aliasLookup
         guard let candidate = SpokenDigitParser.parseThreeDigits(
             from: transcript,
@@ -450,20 +478,14 @@ final class AppModel {
         speechPartialResetTask = nil
         recognizedDigitCountInCurrentAttempt = 3
         DiagnosticLog.event("speech", "three-digit candidate parsed; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase)) candidate=\(candidate)")
-        currentTrialMeasurement?.speech.append(
-            .init(
-                utterance: SpokenDigitParser.normalizedForStorage(
-                    transcript,
-                    aliases: aliasLookup
-                ),
-                ms: elapsedMilliseconds()
-            )
-        )
+        handleTrialCandidate(candidate, spoken: true)
+    }
 
-        speechListener.pauseForFeedback()
-
-        if candidate == experiment.grid.targetNumber {
-            if trialPhase == .targetCue {
+    private func handleTrialCandidate(_ candidate: String, spoken: Bool) {
+        guard let experiment else { return }
+        if spoken { speechListener.pauseForFeedback() }
+        if trialPhase == .targetCue {
+            if candidate == experiment.grid.targetNumber {
                 trialPhase = .search
                 let targetReadMS = elapsedMilliseconds()
                 currentTrialMeasurement?.digitRevealMS = targetReadMS
@@ -473,49 +495,111 @@ final class AppModel {
                 stimulusPresentationState.revealGrid()
                 feedbackSoundPlayer.playPop()
                 statusMessage = "Target confirmed. Find it, then read the three crossing digits."
-            }
-            // Participants naturally repeat the target while searching. Treat
-            // that as neither correct nor incorrect and start a clean speech
-            // recognition pass without playing feedback.
-            scheduleSpeechRestart(afterNanoseconds: 250_000_000)
-        } else if trialPhase == .targetCue {
-            statusMessage = "Heard \(candidate), but that isn't the target shown above the grid. Try again."
-            feedbackSoundPlayer.playWrong()
-            scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
-        } else if candidate == experiment.grid.verificationCode {
-            guard let measurement = currentTrialMeasurement,
-                  let digitRevealMS = measurement.digitRevealMS else {
-                statusMessage = "Correct response, but the trial timing record is incomplete."
-                print("SmartFOV123 result error: trial timing record is incomplete.")
-                return
-            }
-            let targetFoundMS = elapsedMilliseconds()
-            feedbackSoundPlayer.playCorrect()
-            do {
-                try resultFileWriter.appendCompletedTrial(
-                    experiment,
-                    results: .init(
-                        startTimeMS: measurement.startTimeMS,
-                        digitRevealMS: digitRevealMS,
-                        targetFoundMS: targetFoundMS,
-                        speech: measurement.speech
-                    )
-                )
-                completedTargetCount += 1
-                DiagnosticLog.event("result", "trial saved; trial=\(currentTrialIndex + 1) score=\(completedTargetCount) elapsedMS=\(targetFoundMS)")
-                statusMessage = "Correct — heard \(candidate)."
-                stimulusPresentationState.highlightSolution()
-                scheduleCompletedTrialAdvance()
-            } catch {
-                statusMessage = "Correct response, but trial \(currentTrialIndex + 1) couldn't be saved: \(error.localizedDescription) Say the crossing sequence again to retry."
-                print("SmartFOV123 result error: \(error.localizedDescription)")
+                scheduleSpeechRestart(afterNanoseconds: 250_000_000)
+            } else {
+                statusMessage = "\(spoken ? "Heard" : "Entered") \(candidate), but that isn't the target shown above the grid. Try again."
+                feedbackSoundPlayer.playWrong()
                 scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
             }
+            return
+        }
+
+        let answerCorrect = candidate == experiment.grid.verificationCode
+        guard let measurement = currentTrialMeasurement,
+              let digitRevealMS = measurement.digitRevealMS,
+              let stopSignalStartMS = measurement.stopSignalStartMS else {
+            statusMessage = "Use the configured stop command before entering the crossing number."
+            scheduleSpeechRestart(afterNanoseconds: 250_000_000)
+            return
+        }
+        if answerCorrect {
+            feedbackSoundPlayer.playCorrect()
         } else {
-            statusMessage = "Heard \(candidate), but that isn't the crossing sequence. Try again."
             feedbackSoundPlayer.playWrong()
+        }
+        do {
+            try resultFileWriter.appendCompletedTrial(
+                experiment,
+                results: .init(
+                    startTimeMS: measurement.startTimeMS,
+                    digitRevealMS: digitRevealMS,
+                    stopSignalStartMS: stopSignalStartMS,
+                    answerCorrect: answerCorrect,
+                    speech: measurement.speech,
+                    keyboard: measurement.keyboard
+                )
+            )
+            if answerCorrect { completedTargetCount += 1 }
+            DiagnosticLog.event("result", "trial saved; trial=\(currentTrialIndex + 1) correct=\(answerCorrect) score=\(completedTargetCount) stopSignalMS=\(stopSignalStartMS)")
+            statusMessage = "\(answerCorrect ? "Correct" : "Incorrect") — \(spoken ? "heard" : "entered") \(candidate)."
+            stimulusPresentationState.highlightSolution(correct: answerCorrect)
+            trialPhase = .transitioning
+            scheduleCompletedTrialAdvance()
+        } catch {
+            statusMessage = "Response received, but trial \(currentTrialIndex + 1) couldn't be saved: \(error.localizedDescription)"
+            print("SmartFOV123 result error: \(error.localizedDescription)")
             scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
         }
+    }
+
+    private func shouldUseSpeech(in phase: TrialPhase) -> Bool {
+        guard let plan else { return true }
+        switch phase {
+        case .targetCue:
+            return plan.input.startDigits == .speech
+        case .search:
+            return plan.input.stopCommand == .speechStop || plan.input.crossDigits == .speech
+        default:
+            return true
+        }
+    }
+
+    private func handleExperimentKey(_ key: ExperimentKey) {
+        guard let plan, immersiveSpaceState == .open else { return }
+        let eventMS = elapsedMilliseconds()
+        if trialPhase == .targetCue || trialPhase == .search {
+            currentTrialMeasurement?.keyboard.append(.init(key: key.logName, startMS: Int64(eventMS)))
+        }
+        switch key {
+        case .space where trialPhase == .search && plan.input.stopCommand == .keyboardSpace:
+            stopSearchTimer(atMS: eventMS)
+        case .digit(let digit) where trialPhase == .targetCue && plan.input.startDigits == .keyboard:
+            collectKeyboardDigit(digit)
+        case .digit(let digit) where trialPhase == .search && plan.input.crossDigits == .keyboard:
+            collectKeyboardDigit(digit)
+        case .delete where acceptsKeyboardDigits:
+            if !keyboardDigits.isEmpty { keyboardDigits.removeLast() }
+        case .enter where acceptsKeyboardDigits:
+            submitKeyboardDigits()
+        default:
+            break
+        }
+    }
+
+    private func collectKeyboardDigit(_ digit: Character) {
+        guard keyboardDigits.count < 3 else { return }
+        keyboardDigits.append(digit)
+    }
+
+    private var acceptsKeyboardDigits: Bool {
+        guard let plan else { return false }
+        return (trialPhase == .targetCue && plan.input.startDigits == .keyboard)
+            || (trialPhase == .search && plan.input.crossDigits == .keyboard)
+    }
+
+    private func submitKeyboardDigits() {
+        guard keyboardDigits.count == 3 else { return }
+        let candidate = keyboardDigits
+        keyboardDigits = ""
+        handleTrialCandidate(candidate, spoken: false)
+    }
+
+    private func stopSearchTimer(atMS milliseconds: UInt64) {
+        guard trialPhase == .search,
+              currentTrialMeasurement?.stopSignalStartMS == nil else { return }
+        currentTrialMeasurement?.stopSignalStartMS = milliseconds
+        pauseTimedSession()
+        statusMessage = "Timer stopped. Enter the three crossing digits."
     }
 
     func advanceAfterCompletedTrial() {
@@ -602,9 +686,49 @@ final class AppModel {
     }
 
     private func elapsedMilliseconds() -> UInt64 {
-        let now = DispatchTime.now().uptimeNanoseconds
-        guard now >= appStartUptimeNanoseconds else { return 0 }
-        return (now - appStartUptimeNanoseconds) / 1_000_000
+        elapsedMilliseconds(atUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds)
+    }
+
+    private func elapsedMilliseconds(atUptimeNanoseconds uptime: UInt64) -> UInt64 {
+        guard uptime >= appStartUptimeNanoseconds else { return 0 }
+        return (uptime - appStartUptimeNanoseconds) / 1_000_000
+    }
+
+    private func mergeSpeechSegments(
+        _ segments: [TimedSpeechSegment],
+        aliases: [String: Int]
+    ) {
+        guard currentTrialMeasurement != nil else { return }
+        for segment in segments {
+            let raw = segment.text.lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let words = raw.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+            let tokenText = words.count == 1 ? words[0] : raw
+            let normalized = aliases[tokenText].map(String.init) ?? tokenText
+            let tokens = normalized.allSatisfy(\.isNumber) && normalized.count > 1
+                ? normalized.map(String.init)
+                : [normalized]
+            let start = elapsedMilliseconds(atUptimeNanoseconds: segment.startUptimeNanoseconds)
+            let stop = elapsedMilliseconds(atUptimeNanoseconds: segment.stopUptimeNanoseconds)
+            let duration = stop >= start ? stop - start : 0
+            for (index, token) in tokens.enumerated() {
+                let tokenStart = start + duration * UInt64(index) / UInt64(tokens.count)
+                let tokenStop = start + duration * UInt64(index + 1) / UInt64(tokens.count)
+                let id = "\(segment.id)-\(index)"
+                let event = CompletedTrialResults.SpeechDetection(
+                    id: id,
+                    token: token,
+                    startMS: Int64(tokenStart),
+                    stopMS: Int64(tokenStop)
+                )
+                if let existing = currentTrialMeasurement?.speech.firstIndex(where: { $0.id == id }) {
+                    currentTrialMeasurement?.speech[existing] = event
+                } else {
+                    currentTrialMeasurement?.speech.append(event)
+                }
+            }
+        }
+        currentTrialMeasurement?.speech.sort { $0.startMS < $1.startMS }
     }
 
     private func handleParticipantNumber(_ transcript: String, experiment: Experiment) {
@@ -705,7 +829,8 @@ final class AppModel {
         resultFileWriter.beginExperiment(
             protocolName: plan.protocolName,
             subjectNumber: subjectNumber,
-            taskMode: plan.taskMode
+            taskMode: plan.taskMode,
+            input: plan.input
         )
         hasExperimentBegun = true
         speechListener.stop()
@@ -782,27 +907,46 @@ final class AppModel {
               case .loopTrials(let seconds) = plan.taskMode,
               hasExperimentBegun,
               trialPhase == .targetCue || trialPhase == .search,
-              timedSessionTask == nil,
+              timedSessionSearchStartNanoseconds == nil,
               !hasTimedSessionEnded else { return }
 
         let durationNanoseconds = UInt64(seconds) * 1_000_000_000
-        DiagnosticLog.event("session", "timed session started; durationSeconds=\(seconds)")
-        stimulusPresentationState.startTimeBar(durationSeconds: seconds)
+        let remainingNanoseconds = durationNanoseconds > timedSessionElapsedNanoseconds
+            ? durationNanoseconds - timedSessionElapsedNanoseconds
+            : 0
+        guard remainingNanoseconds > 0 else {
+            finishTimedSession(durationSeconds: seconds)
+            return
+        }
+        timedSessionSearchStartNanoseconds = DispatchTime.now().uptimeNanoseconds
+        DiagnosticLog.event("session", "timed session resumed; durationSeconds=\(seconds) elapsedNanoseconds=\(timedSessionElapsedNanoseconds)")
+        stimulusPresentationState.startTimeBar(
+            durationSeconds: seconds,
+            elapsedNanoseconds: timedSessionElapsedNanoseconds
+        )
         if let stimulus = instantiatedExperiment?.configuration.stimulus {
             timedSessionFinalGongVolume = stimulus.finalGongVolume
-            metronomePlayer.start(
-                minimumBeatsPerMinute: stimulus.metronomeMinimumBeatsPerMinute,
-                maximumBeatsPerMinute: stimulus.metronomeMaximumBeatsPerMinute,
-                incrementIntervalBeats: stimulus.metronomeIncrementIntervalBeats,
-                volume: stimulus.metronomeVolume,
-                durationSeconds: seconds
-            )
+            countdownAudioPlayer.start(volume: stimulus.stopwatchVolume)
         }
         timedSessionTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: durationNanoseconds)
+            try? await Task.sleep(nanoseconds: remainingNanoseconds)
             guard !Task.isCancelled else { return }
             self?.finishTimedSession(durationSeconds: seconds)
         }
+    }
+
+    private func pauseTimedSession() {
+        guard let searchStart = timedSessionSearchStartNanoseconds else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        if now >= searchStart {
+            timedSessionElapsedNanoseconds += now - searchStart
+        }
+        timedSessionSearchStartNanoseconds = nil
+        timedSessionTask?.cancel()
+        timedSessionTask = nil
+        stimulusPresentationState.pauseTimeBar()
+        countdownAudioPlayer.pause()
+        DiagnosticLog.event("session", "timed session paused; elapsedNanoseconds=\(timedSessionElapsedNanoseconds)")
     }
 
     private func finishTimedSession(durationSeconds: Int) {
@@ -810,12 +954,14 @@ final class AppModel {
         hasTimedSessionEnded = true
         DiagnosticLog.event("session", "timed session finishing; durationSeconds=\(durationSeconds) score=\(completedTargetCount)")
         stimulusPresentationState.stopTimeBar()
-        metronomePlayer.finishSession()
+        countdownAudioPlayer.pause()
         timedSessionTask = nil
+        timedSessionSearchStartNanoseconds = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         speechListener.stop()
         currentTrialMeasurement = nil
+        keyboardInputListener.stop()
         trialPhase = .debriefing
         stimulusPresentationState.hide()
 
@@ -832,23 +978,24 @@ final class AppModel {
         }
         synchronizeParticipantPresentation()
         if timedSessionFinalGongVolume > 0 {
-            metronomePlayer.playGong(volume: timedSessionFinalGongVolume)
+            countdownAudioPlayer.playGong(volume: timedSessionFinalGongVolume)
         }
         timedSessionFinalGongVolume = 0
     }
 
     /// The Digital Crown returns the windowless experience to Home View,
-    /// which backgrounds the research app. Save and quiet the session, then
-    /// let visionOS suspend or terminate the process through its normal app
-    /// lifecycle instead of forcing process termination with exit().
-    private func prepareForBackground() {
+    /// which backgrounds the privately deployed research app. Save and quiet
+    /// the session synchronously before terminating the process.
+    private func terminateWhenBackgrounded() -> Never {
         print("SmartFOV123 lifecycle: scene entered background; saving and stopping session work.")
         DiagnosticLog.event("lifecycle", "background cleanup begin; phase=\(String(describing: trialPhase)) trial=\(currentTrialIndex + 1)")
         let wasExperimentActive = hasExperimentBegun && !hasCompletedExperiment
         speechListener.prepareForBackground()
-        metronomePlayer.stop()
+        keyboardInputListener.stop()
+        countdownAudioPlayer.stop()
         timedSessionTask?.cancel()
         timedSessionTask = nil
+        timedSessionSearchStartNanoseconds = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         speechPartialResetTask?.cancel()
@@ -868,6 +1015,7 @@ final class AppModel {
             synchronizeParticipantPresentation()
         }
         DiagnosticLog.event("lifecycle", "background cleanup complete; wasExperimentActive=\(wasExperimentActive)")
+        exit(EXIT_SUCCESS)
     }
 
 }
@@ -875,5 +1023,7 @@ final class AppModel {
 private struct InProgressTrialMeasurement {
     let startTimeMS: UInt64
     var digitRevealMS: UInt64?
+    var stopSignalStartMS: UInt64?
     var speech: [CompletedTrialResults.SpeechDetection] = []
+    var keyboard: [CompletedTrialResults.KeyboardDetection] = []
 }

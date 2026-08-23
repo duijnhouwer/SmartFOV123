@@ -7,7 +7,8 @@ struct StimulusTexture {
     enum Presentation {
         case masked
         case revealed
-        case highlighted
+        case highlightedCorrect
+        case highlightedWrong
     }
 
     let texture: MTLTexture
@@ -247,7 +248,9 @@ struct StimulusTexture {
             let highlightDigitAttributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): highlightDigitFont,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
-                    config.digitHighlightRGB.cgColor
+                    (presentation == .highlightedCorrect
+                        ? config.digitHighlightCorrectRGB
+                        : config.digitHighlightWrongRGB).cgColor
             ]
             let annotationAttributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): annotationFont,
@@ -285,7 +288,8 @@ struct StimulusTexture {
                 in: context
             )
 
-            let highlightedIndices = presentation == .highlighted
+            let highlightedIndices = presentation == .highlightedCorrect
+                || presentation == .highlightedWrong
                 ? Self.solutionIndices(in: experiment.grid)
                 : []
             for index in experiment.grid.digits.indices {
@@ -340,7 +344,8 @@ struct StimulusTexture {
         switch presentation {
         case .masked: presentationLabel = "masked"
         case .revealed: presentationLabel = "revealed"
-        case .highlighted: presentationLabel = "highlighted"
+        case .highlightedCorrect: presentationLabel = "highlighted-correct"
+        case .highlightedWrong: presentationLabel = "highlighted-wrong"
         }
         texture.label = "Precomposed SmartFOV123 stimulus (\(display.mode.rawValue), \(presentationLabel))"
         pixels.withUnsafeBytes { bytes in

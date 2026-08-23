@@ -122,7 +122,8 @@ private struct TrialRenderResources: @unchecked Sendable {
     let geometry: StimulusGeometry
     let maskedTexture: StimulusTexture
     let revealedTexture: StimulusTexture
-    let highlightedTexture: StimulusTexture
+    let correctHighlightTexture: StimulusTexture
+    let wrongHighlightTexture: StimulusTexture
     let timeBarTexture: TimeBarTexture?
     let taskMode: TaskMode
 }
@@ -209,7 +210,8 @@ actor Renderer {
     private let depthState: MTLDepthStencilState
     private var maskedStimulusTexture: StimulusTexture?
     private var revealedStimulusTexture: StimulusTexture?
-    private var highlightedStimulusTexture: StimulusTexture?
+    private var correctHighlightStimulusTexture: StimulusTexture?
+    private var wrongHighlightStimulusTexture: StimulusTexture?
     private var timeBarTexture: TimeBarTexture?
     private var taskMode: TaskMode = .fixedNumberOfTrials
     private let presentationState: StimulusPresentationState
@@ -248,7 +250,8 @@ actor Renderer {
         self.commandQueue = commandQueue
         self.maskedStimulusTexture = nil
         self.revealedStimulusTexture = nil
-        self.highlightedStimulusTexture = nil
+        self.correctHighlightStimulusTexture = nil
+        self.wrongHighlightStimulusTexture = nil
         self.timeBarTexture = nil
 
         guard let library = device.makeDefaultLibrary() else {
@@ -346,7 +349,7 @@ actor Renderer {
                     appModel.immersiveSpaceState = .open
                 }
             }
-            await MainActor.run {
+            _ = await MainActor.run {
                 activeLayerRendererIDs.remove(layerRendererID)
             }
         }
@@ -440,7 +443,8 @@ actor Renderer {
             geometry = resources.geometry
             maskedStimulusTexture = resources.maskedTexture
             revealedStimulusTexture = resources.revealedTexture
-            highlightedStimulusTexture = resources.highlightedTexture
+            correctHighlightStimulusTexture = resources.correctHighlightTexture
+            wrongHighlightStimulusTexture = resources.wrongHighlightTexture
             timeBarTexture = resources.timeBarTexture
             taskMode = resources.taskMode
             activeTrialRevision = revision
@@ -489,14 +493,23 @@ actor Renderer {
                         trialsRemaining: request.trialsRemaining,
                         presentation: .revealed
                     ),
-                    highlightedTexture: StimulusTexture(
+                    correctHighlightTexture: StimulusTexture(
                         device: device,
                         commandQueue: textureCommandQueue,
                         experiment: request.experiment,
                         taskMode: request.taskMode,
                         score: request.score,
                         trialsRemaining: request.trialsRemaining,
-                        presentation: .highlighted
+                        presentation: .highlightedCorrect
+                    ),
+                    wrongHighlightTexture: StimulusTexture(
+                        device: device,
+                        commandQueue: textureCommandQueue,
+                        experiment: request.experiment,
+                        taskMode: request.taskMode,
+                        score: request.score,
+                        trialsRemaining: request.trialsRemaining,
+                        presentation: .highlightedWrong
                     ),
                     timeBarTexture: request.taskMode.durationSeconds == nil
                         ? nil
@@ -656,9 +669,12 @@ actor Renderer {
             surfaceCenter = geometry?.fovCenterMeters ?? .zero
             surfaceHalfSize = geometry?.fovHalfSizeMeters ?? .zero
             surfaceDistance = geometry?.distanceMeters ?? 1.5
-        case .highlightedGrid:
-            surfaceTexture = highlightedStimulusTexture?.texture
-            rendersSurface = highlightedStimulusTexture != nil && geometry != nil
+        case .highlightedGrid(let correct):
+            let highlightTexture = correct
+                ? correctHighlightStimulusTexture
+                : wrongHighlightStimulusTexture
+            surfaceTexture = highlightTexture?.texture
+            rendersSurface = highlightTexture != nil && geometry != nil
             rendersTimeBar = true
             rendersBinocularly = false
             surfaceCenter = geometry?.fovCenterMeters ?? .zero

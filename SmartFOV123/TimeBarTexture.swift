@@ -85,7 +85,7 @@ struct TimeBarTexture {
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw StimulusTextureError.textureCreationFailed
         }
-        texture.label = "Precomposed SmartFOV123 timer sausage"
+        texture.label = "Precomposed SmartFOV123 countdown bar"
         pixels.withUnsafeBytes { bytes in
             texture.replace(
                 region: MTLRegionMake2D(0, 0, width, height),

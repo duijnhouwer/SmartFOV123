@@ -20,7 +20,7 @@ final class StimulusPresentationState: @unchecked Sendable {
         case participantPrompt(Prompt)
         case maskedGrid
         case revealedGrid
-        case highlightedGrid
+        case highlightedGrid(correct: Bool)
     }
 
     private let lock = NSLock()
@@ -32,6 +32,7 @@ final class StimulusPresentationState: @unchecked Sendable {
     private var rendererRunning = false
     private var timeBarStartUptimeNanoseconds: UInt64?
     private var timeBarDurationNanoseconds: UInt64?
+    private var timeBarElapsedNanoseconds: UInt64 = 0
 
     var content: Content {
         lock.withLock { currentContent }
@@ -51,18 +52,35 @@ final class StimulusPresentationState: @unchecked Sendable {
 
     var timeBarFillFraction: Float {
         lock.withLock {
-            guard let start = timeBarStartUptimeNanoseconds,
-                  let duration = timeBarDurationNanoseconds, duration > 0 else { return 1 }
-            let now = DispatchTime.now().uptimeNanoseconds
-            let elapsed = now >= start ? now - start : 0
+            guard let duration = timeBarDurationNanoseconds, duration > 0 else { return 1 }
+            let activeElapsed: UInt64
+            if let start = timeBarStartUptimeNanoseconds {
+                let now = DispatchTime.now().uptimeNanoseconds
+                activeElapsed = now >= start ? now - start : 0
+            } else {
+                activeElapsed = 0
+            }
+            let elapsed = min(duration, timeBarElapsedNanoseconds + activeElapsed)
             return Float(max(0, 1 - Double(elapsed) / Double(duration)))
         }
     }
 
-    func startTimeBar(durationSeconds: Int) {
+    func startTimeBar(durationSeconds: Int, elapsedNanoseconds: UInt64 = 0) {
         lock.withLock {
             timeBarStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
             timeBarDurationNanoseconds = UInt64(durationSeconds) * 1_000_000_000
+            timeBarElapsedNanoseconds = elapsedNanoseconds
+        }
+    }
+
+    func pauseTimeBar() {
+        lock.withLock {
+            guard let start = timeBarStartUptimeNanoseconds else { return }
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now >= start {
+                timeBarElapsedNanoseconds += now - start
+            }
+            timeBarStartUptimeNanoseconds = nil
         }
     }
 
@@ -70,6 +88,7 @@ final class StimulusPresentationState: @unchecked Sendable {
         lock.withLock {
             timeBarStartUptimeNanoseconds = nil
             timeBarDurationNanoseconds = nil
+            timeBarElapsedNanoseconds = 0
         }
     }
 
@@ -132,9 +151,9 @@ final class StimulusPresentationState: @unchecked Sendable {
         }
     }
 
-    func highlightSolution() {
+    func highlightSolution(correct: Bool) {
         lock.withLock {
-            currentContent = .highlightedGrid
+            currentContent = .highlightedGrid(correct: correct)
         }
     }
 

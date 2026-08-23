@@ -65,6 +65,32 @@ enum DigitRandomMethod: String, Decodable, CaseIterable, Sendable {
     }
 }
 
+enum DigitInputMethod: String, Decodable, Encodable, Sendable {
+    case keyboard
+    case speech
+}
+
+enum StopCommandInputMethod: String, Decodable, Encodable, Sendable {
+    case keyboardSpace = "keyboard_space"
+    case speechStop = "speech_stop"
+}
+
+struct InputConfiguration: Decodable, Encodable, Sendable {
+    let startDigits: DigitInputMethod
+    let stopCommand: StopCommandInputMethod
+    let crossDigits: DigitInputMethod
+
+    var usesTrialSpeech: Bool {
+        startDigits == .speech || stopCommand == .speechStop || crossDigits == .speech
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case startDigits = "start_digits"
+        case stopCommand = "stop_command"
+        case crossDigits = "cross_digits"
+    }
+}
+
 enum TaskMode: Equatable, Sendable {
     case fixedNumberOfTrials
     case loopTrials(seconds: Int)
@@ -147,7 +173,8 @@ struct StimulusConfiguration: Sendable {
     let digitFontName: String
     let digitRGB: RGB
     let digitRandomMethod: DigitRandomMethod
-    let digitHighlightRGB: RGB
+    let digitHighlightCorrectRGB: RGB
+    let digitHighlightWrongRGB: RGB
     let digitHighlightFontName: String
 
     let annotationHeightArcmin: Float
@@ -160,10 +187,7 @@ struct StimulusConfiguration: Sendable {
     let timeBarBackRGB: RGB
     let timeBarBackHeightArcmin: Float
     let timeBarBackCornerRadiusArcmin: Float
-    let metronomeMinimumBeatsPerMinute: Int
-    let metronomeMaximumBeatsPerMinute: Int
-    let metronomeIncrementIntervalBeats: Int
-    let metronomeVolume: Float
+    let stopwatchVolume: Float
     let finalGongVolume: Float
 
     let correctFeedbackFile: String
@@ -278,6 +302,7 @@ struct ExperimentPlan: Sendable {
     let debriefingTitle: String
     let debriefing: String
     let taskMode: TaskMode
+    let input: InputConfiguration
     /// Compositor-layer configuration is fixed for the duration of a session,
     /// so this option applies consistently to every trial in the plan.
     let foveatedRendering: Bool
@@ -462,7 +487,7 @@ struct ProtocolCatalog: Sendable {
         do {
             try fileManager.copyItem(at: sourceURL, to: stagedURL)
             if fileManager.fileExists(atPath: destinationURL.path) {
-                try fileManager.replaceItemAt(destinationURL, withItemAt: stagedURL)
+                _ = try fileManager.replaceItemAt(destinationURL, withItemAt: stagedURL)
             } else {
                 try fileManager.moveItem(at: stagedURL, to: destinationURL)
             }
@@ -511,6 +536,7 @@ private struct ExperimentFile: Decodable {
     let debriefingTitle: String
     let debriefing: String
     let taskMode: TaskMode
+    let input: InputConfiguration
     let foveatedRendering: Bool?
     let masterConditionTemplate: ConditionDefinition
     let conditions: [ConditionDefinition]
@@ -522,6 +548,7 @@ private struct ExperimentFile: Decodable {
         case debriefingTitle = "debriefing_title"
         case debriefing
         case taskMode = "task_mode"
+        case input
         case foveatedRendering = "foveated_rendering"
         case masterConditionTemplate = "master_condition_template"
         case conditions
@@ -559,7 +586,8 @@ private struct DigitPatch: Decodable {
     let fontName: String?
     let rgb: RGB?
     let randomMethod: DigitRandomMethod?
-    let highlightRGB: RGB?
+    let highlightCorrectRGB: RGB?
+    let highlightWrongRGB: RGB?
     let highlightFont: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -567,7 +595,8 @@ private struct DigitPatch: Decodable {
         case fontName = "font_name"
         case rgb
         case randomMethod = "random_method"
-        case highlightRGB = "highlight_rgb"
+        case highlightCorrectRGB = "highlight_correct_rgb"
+        case highlightWrongRGB = "highlight_wrong_rgb"
         case highlightFont = "highlight_font"
     }
 }
@@ -584,7 +613,7 @@ private struct AnnotationPatch: Decodable {
     }
 }
 
-private struct TimerSausagePatch: Decodable {
+private struct CountdownBarPatch: Decodable {
     let fillRGB: RGB?
     let heightDegrees: Float?
     let cornerRadiusDegrees: Float?
@@ -602,27 +631,14 @@ private struct TimerSausagePatch: Decodable {
     }
 }
 
-private struct MetronomePatch: Decodable {
-    let minimumBeatsPerMinute: Int?
-    let maximumBeatsPerMinute: Int?
-    let incrementIntervalBeats: Int?
-    let volume: Float?
-
-    private enum CodingKeys: String, CodingKey {
-        case minimumBeatsPerMinute = "min_beats_per_minute"
-        case maximumBeatsPerMinute = "max_beats_per_minute"
-        case incrementIntervalBeats = "increment_interval_beats"
-        case volume
-    }
-}
-
-private struct TimerPatch: Decodable {
-    let sausage: TimerSausagePatch?
-    let metronome: MetronomePatch?
+private struct CountdownPatch: Decodable {
+    let bar: CountdownBarPatch?
+    let stopwatchVolume: Float?
     let finalGongVolume: Float?
 
     private enum CodingKeys: String, CodingKey {
-        case sausage, metronome
+        case bar
+        case stopwatchVolume = "stopwatch_volume"
         case finalGongVolume = "final_gong_volume"
     }
 }
@@ -717,7 +733,7 @@ private struct ConditionDefinition: Decodable {
     let passthroughDimming: Double?
     let digits: DigitPatch?
     let annotation: AnnotationPatch?
-    let timer: TimerPatch?
+    let countdown: CountdownPatch?
     let feedbackSounds: FeedbackSoundsPatch?
     let tiles: TilePatch?
     let surround: SurroundPatch?
@@ -729,7 +745,7 @@ private struct ConditionDefinition: Decodable {
         case randomSeed = "random_seed"
         case passthroughDimming = "passthrough_dimming"
         case blockNumber = "block_nr"
-        case digits, annotation, timer, feedbackSounds = "feedback_sounds", tiles, surround, fov, speech
+        case digits, annotation, countdown, feedbackSounds = "feedback_sounds", tiles, surround, fov, speech
     }
 
 }
@@ -742,7 +758,7 @@ private struct ResolvedConditionPatch {
     var digits = ResolvedDigits()
     var annotation = ResolvedAnnotation()
     var timeBar = ResolvedTimeBar()
-    var metronome = ResolvedMetronome()
+    var countdownAudio = ResolvedCountdownAudio()
     var feedbackSounds = ResolvedFeedbackSounds()
     var tiles = ResolvedTiles()
     var surround = ResolvedSurround()
@@ -761,7 +777,8 @@ private struct ResolvedConditionPatch {
             digits.fontName = patch.fontName ?? digits.fontName
             digits.rgb = patch.rgb ?? digits.rgb
             digits.randomMethod = patch.randomMethod ?? digits.randomMethod
-            digits.highlightRGB = patch.highlightRGB ?? digits.highlightRGB
+            digits.highlightCorrectRGB = patch.highlightCorrectRGB ?? digits.highlightCorrectRGB
+            digits.highlightWrongRGB = patch.highlightWrongRGB ?? digits.highlightWrongRGB
             digits.highlightFont = patch.highlightFont ?? digits.highlightFont
         }
         if let patch = definition.annotation {
@@ -769,7 +786,7 @@ private struct ResolvedConditionPatch {
             annotation.fontName = patch.fontName ?? annotation.fontName
             annotation.fontRGB = patch.fontRGB ?? annotation.fontRGB
         }
-        if let patch = definition.timer?.sausage {
+        if let patch = definition.countdown?.bar {
             timeBar.fillRGB = patch.fillRGB ?? timeBar.fillRGB
             timeBar.heightDegrees = patch.heightDegrees ?? timeBar.heightDegrees
             timeBar.cornerRadiusDegrees = patch.cornerRadiusDegrees
@@ -779,14 +796,10 @@ private struct ResolvedConditionPatch {
             timeBar.backCornerRadiusDegrees = patch.backCornerRadiusDegrees
                 ?? timeBar.backCornerRadiusDegrees
         }
-        if let patch = definition.timer?.metronome {
-            metronome.minimumBeatsPerMinute = patch.minimumBeatsPerMinute ?? metronome.minimumBeatsPerMinute
-            metronome.maximumBeatsPerMinute = patch.maximumBeatsPerMinute ?? metronome.maximumBeatsPerMinute
-            metronome.incrementIntervalBeats = patch.incrementIntervalBeats ?? metronome.incrementIntervalBeats
-            metronome.volume = patch.volume ?? metronome.volume
-        }
-        metronome.finalGongVolume = definition.timer?.finalGongVolume
-            ?? metronome.finalGongVolume
+        countdownAudio.stopwatchVolume = definition.countdown?.stopwatchVolume
+            ?? countdownAudio.stopwatchVolume
+        countdownAudio.finalGongVolume = definition.countdown?.finalGongVolume
+            ?? countdownAudio.finalGongVolume
         if let patch = definition.feedbackSounds?.correct {
             feedbackSounds.correctFile = patch.file ?? feedbackSounds.correctFile
             feedbackSounds.correctVolume = patch.volume ?? feedbackSounds.correctVolume
@@ -839,7 +852,8 @@ private struct ResolvedDigits {
     var fontName: String?
     var rgb: RGB?
     var randomMethod: DigitRandomMethod?
-    var highlightRGB: RGB?
+    var highlightCorrectRGB: RGB?
+    var highlightWrongRGB: RGB?
     var highlightFont: String?
 }
 
@@ -858,11 +872,8 @@ private struct ResolvedTimeBar {
     var backCornerRadiusDegrees: Float?
 }
 
-private struct ResolvedMetronome {
-    var minimumBeatsPerMinute: Int?
-    var maximumBeatsPerMinute: Int?
-    var incrementIntervalBeats: Int?
-    var volume: Float?
+private struct ResolvedCountdownAudio {
+    var stopwatchVolume: Float?
     var finalGongVolume: Float?
 }
 
@@ -916,9 +927,9 @@ private enum ConditionResolver {
     static let maximumTrialCount = 10_000
 
     static func makePlan(from file: ExperimentFile, protocolName: String) throws -> ExperimentPlan {
-        guard file.schemaVersion == 6 else {
+        guard file.schemaVersion == 9 else {
             throw ExperimentError.invalidConfiguration(
-                "schema_version \(file.schemaVersion) is unsupported; this app requires version 6."
+                "schema_version \(file.schemaVersion) is unsupported; this app requires version 9."
             )
         }
         guard !file.conditions.isEmpty else {
@@ -1067,6 +1078,7 @@ private enum ConditionResolver {
             debriefingTitle: debriefingTitle,
             debriefing: debriefing,
             taskMode: file.taskMode,
+            input: file.input,
             foveatedRendering: file.foveatedRendering ?? true,
             trials: trials
         )
@@ -1083,7 +1095,8 @@ private enum ConditionResolver {
         guard let fontName = patch.digits.fontName else { try missing("digits.font_name") }
         guard patch.digits.rgb != nil else { try missing("digits.rgb") }
         guard patch.digits.randomMethod != nil else { try missing("digits.random_method") }
-        guard patch.digits.highlightRGB != nil else { try missing("digits.highlight_rgb") }
+        guard patch.digits.highlightCorrectRGB != nil else { try missing("digits.highlight_correct_rgb") }
+        guard patch.digits.highlightWrongRGB != nil else { try missing("digits.highlight_wrong_rgb") }
         guard let highlightFont = patch.digits.highlightFont else {
             try missing("digits.highlight_font")
         }
@@ -1094,31 +1107,22 @@ private enum ConditionResolver {
             try missing("annotation.font_name")
         }
         guard patch.annotation.fontRGB != nil else { try missing("annotation.font_rgb") }
-        guard patch.timeBar.fillRGB != nil else { try missing("timer.sausage.fill_rgb") }
+        guard patch.timeBar.fillRGB != nil else { try missing("countdown.bar.fill_rgb") }
         guard let timeBarHeight = patch.timeBar.heightDegrees else {
-            try missing("timer.sausage.height_degrees")
+            try missing("countdown.bar.height_degrees")
         }
         guard let timeBarCornerRadius = patch.timeBar.cornerRadiusDegrees else {
-            try missing("timer.sausage.corner_radius_degrees")
+            try missing("countdown.bar.corner_radius_degrees")
         }
-        guard patch.timeBar.backRGB != nil else { try missing("timer.sausage.back_rgb") }
+        guard patch.timeBar.backRGB != nil else { try missing("countdown.bar.back_rgb") }
         guard let timeBarBackHeight = patch.timeBar.backHeightDegrees else {
-            try missing("timer.sausage.back_height_degrees")
+            try missing("countdown.bar.back_height_degrees")
         }
-        guard let metronomeMinimumBPM = patch.metronome.minimumBeatsPerMinute else {
-            try missing("timer.metronome.min_beats_per_minute")
+        guard let stopwatchVolume = patch.countdownAudio.stopwatchVolume else {
+            try missing("countdown.stopwatch_volume")
         }
-        guard let metronomeMaximumBPM = patch.metronome.maximumBeatsPerMinute else {
-            try missing("timer.metronome.max_beats_per_minute")
-        }
-        guard let metronomeIncrementInterval = patch.metronome.incrementIntervalBeats else {
-            try missing("timer.metronome.increment_interval_beats")
-        }
-        guard let metronomeVolume = patch.metronome.volume else {
-            try missing("timer.metronome.volume")
-        }
-        guard let finalGongVolume = patch.metronome.finalGongVolume else {
-            try missing("timer.final_gong_volume")
+        guard let finalGongVolume = patch.countdownAudio.finalGongVolume else {
+            try missing("countdown.final_gong_volume")
         }
         guard let correctFeedbackFile = patch.feedbackSounds.correctFile else {
             try missing("feedback_sounds.correct.file")
@@ -1137,7 +1141,7 @@ private enum ConditionResolver {
         guard let tileGutter = patch.tiles.gutterDegrees else { try missing("tiles.gutter_degrees") }
         guard let tileCornerRadius = patch.tiles.cornerRadiusDegrees else { try missing("tiles.corner_radius_degrees") }
         guard let timeBarBackCornerRadius = patch.timeBar.backCornerRadiusDegrees else {
-            try missing("timer.sausage.back_corner_radius_degrees")
+            try missing("countdown.bar.back_corner_radius_degrees")
         }
         guard patch.tiles.fillRGB != nil else { try missing("tiles.fill_rgb") }
         guard patch.tiles.gutterRGB != nil else { try missing("tiles.gutter_rgb") }
@@ -1198,8 +1202,8 @@ private enum ConditionResolver {
         let positive: [(String, Float)] = [
             ("digits.height_degrees", digitHeight),
             ("annotation.height_degrees", annotationHeight),
-            ("timer.sausage.height_degrees", timeBarHeight),
-            ("timer.sausage.back_height_degrees", timeBarBackHeight),
+            ("countdown.bar.height_degrees", timeBarHeight),
+            ("countdown.bar.back_height_degrees", timeBarBackHeight),
             ("tiles.width_degrees", tileWidth),
             ("tiles.height_degrees", tileHeight),
             ("fov.width_degrees", fovWidth),
@@ -1222,8 +1226,8 @@ private enum ConditionResolver {
         let nonnegative: [(String, Float)] = [
             ("tiles.gutter_degrees", tileGutter),
             ("tiles.corner_radius_degrees", tileCornerRadius),
-            ("timer.sausage.corner_radius_degrees", timeBarCornerRadius),
-            ("timer.sausage.back_corner_radius_degrees", timeBarBackCornerRadius),
+            ("countdown.bar.corner_radius_degrees", timeBarCornerRadius),
+            ("countdown.bar.back_corner_radius_degrees", timeBarBackCornerRadius),
             ("surround.inner_margin_degrees", surroundInnerMargin),
             ("surround.inner_corner_radius_degrees", surroundInnerCornerRadius),
             ("surround.outer_corner_radius_degrees", surroundOuterCornerRadius)
@@ -1256,28 +1260,19 @@ private enum ConditionResolver {
             throw invalid(definitionName, "tiles.corner_radius_degrees is too large for the tiles.")
         }
         guard timeBarCornerRadius * 2 <= timeBarHeight else {
-            throw invalid(definitionName, "timer.sausage.corner_radius_degrees is too large for height_degrees.")
+            throw invalid(definitionName, "countdown.bar.corner_radius_degrees is too large for height_degrees.")
         }
         guard timeBarBackCornerRadius * 2 <= timeBarBackHeight else {
-            throw invalid(definitionName, "timer.sausage.back_corner_radius_degrees is too large for back_height_degrees.")
+            throw invalid(definitionName, "countdown.bar.back_corner_radius_degrees is too large for back_height_degrees.")
         }
-        guard metronomeMinimumBPM > 0 else {
-            throw invalid(definitionName, "timer.metronome.min_beats_per_minute must be greater than zero.")
-        }
-        guard metronomeMaximumBPM >= metronomeMinimumBPM else {
-            throw invalid(definitionName, "timer.metronome.max_beats_per_minute must be at least min_beats_per_minute.")
-        }
-        guard metronomeIncrementInterval > 0 else {
-            throw invalid(definitionName, "timer.metronome.increment_interval_beats must be greater than zero.")
-        }
-        guard metronomeVolume.isFinite, (0...1).contains(metronomeVolume) else {
+        guard stopwatchVolume.isFinite, (0...1).contains(stopwatchVolume) else {
             throw invalid(
                 definitionName,
-                "timer.metronome.volume must be finite and between zero and one."
+                "countdown.stopwatch_volume must be finite and between zero and one."
             )
         }
         for (name, volume) in [
-            ("timer.final_gong_volume", finalGongVolume),
+            ("countdown.final_gong_volume", finalGongVolume),
             ("feedback_sounds.correct.volume", correctFeedbackVolume),
             ("feedback_sounds.wrong.volume", wrongFeedbackVolume)
         ] where !volume.isFinite || !(0...1).contains(volume) {
@@ -1313,7 +1308,7 @@ private enum ConditionResolver {
         guard spaceAboveCenteredGrid >= timeBarBackHeight else {
             throw invalid(
                 definitionName,
-                "fov.height_degrees leaves insufficient space below the centered tile grid for timer.sausage.back_height_degrees."
+                "fov.height_degrees leaves insufficient space below the centered tile grid for countdown.bar.back_height_degrees."
             )
         }
         guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1440,7 +1435,8 @@ private enum ConditionResolver {
                 digitFontName: patch.digits.fontName!,
                 digitRGB: patch.digits.rgb!,
                 digitRandomMethod: patch.digits.randomMethod!,
-                digitHighlightRGB: patch.digits.highlightRGB!,
+                digitHighlightCorrectRGB: patch.digits.highlightCorrectRGB!,
+                digitHighlightWrongRGB: patch.digits.highlightWrongRGB!,
                 digitHighlightFontName: patch.digits.highlightFont!,
                 annotationHeightArcmin: patch.annotation.heightDegrees! * 60,
                 annotationFontName: patch.annotation.fontName!,
@@ -1451,11 +1447,8 @@ private enum ConditionResolver {
                 timeBarBackRGB: patch.timeBar.backRGB!,
                 timeBarBackHeightArcmin: patch.timeBar.backHeightDegrees! * 60,
                 timeBarBackCornerRadiusArcmin: patch.timeBar.backCornerRadiusDegrees! * 60,
-                metronomeMinimumBeatsPerMinute: patch.metronome.minimumBeatsPerMinute!,
-                metronomeMaximumBeatsPerMinute: patch.metronome.maximumBeatsPerMinute!,
-                metronomeIncrementIntervalBeats: patch.metronome.incrementIntervalBeats!,
-                metronomeVolume: patch.metronome.volume!,
-                finalGongVolume: patch.metronome.finalGongVolume!,
+                stopwatchVolume: patch.countdownAudio.stopwatchVolume!,
+                finalGongVolume: patch.countdownAudio.finalGongVolume!,
                 correctFeedbackFile: patch.feedbackSounds.correctFile!,
                 correctFeedbackVolume: patch.feedbackSounds.correctVolume!,
                 wrongFeedbackFile: patch.feedbackSounds.wrongFile!,
@@ -1503,9 +1496,17 @@ private enum JSONShapeValidator {
             allowed: [
                 "schema_version", "subject_number_digit_count",
                 "instructions", "debriefing_title", "debriefing", "foveated_rendering", "task_mode",
-                "master_condition_template", "conditions"
+                "input", "master_condition_template", "conditions"
             ],
             path: "$"
+        )
+        guard let rawInput = root["input"] else {
+            throw invalid("$.input", "is required.")
+        }
+        try section(
+            rawInput,
+            path: "$.input",
+            allowed: ["start_digits", "stop_command", "cross_digits"]
         )
         guard let rawMaster = root["master_condition_template"] else {
             throw invalid("$.master_condition_template", "is required.")
@@ -1527,7 +1528,7 @@ private enum JSONShapeValidator {
     ) throws {
             let condition = try dictionary(rawDefinition, path: path)
             var allowed: Set<String> = [
-                "random_seed", "passthrough_dimming", "digits", "annotation", "timer", "feedback_sounds", "tiles", "surround", "fov", "speech"
+                "random_seed", "passthrough_dimming", "digits", "annotation", "countdown", "feedback_sounds", "tiles", "surround", "fov", "speech"
             ]
             if schedulingFields {
                 allowed.formUnion(["block_nr", "repeats"])
@@ -1536,25 +1537,20 @@ private enum JSONShapeValidator {
             try section(
                 condition["digits"],
                 path: "\(path).digits",
-                allowed: ["height_degrees", "font_name", "rgb", "random_method", "highlight_rgb", "highlight_font"]
+                allowed: ["height_degrees", "font_name", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "highlight_font"]
             )
             try section(
                 condition["annotation"],
                 path: "\(path).annotation",
                 allowed: ["height_degrees", "font_name", "font_rgb"]
             )
-            try section(condition["timer"], path: "\(path).timer", allowed: ["sausage", "metronome", "final_gong_volume"])
-            if let rawTimer = condition["timer"] {
-                let timer = try dictionary(rawTimer, path: "\(path).timer")
+            try section(condition["countdown"], path: "\(path).countdown", allowed: ["bar", "stopwatch_volume", "final_gong_volume"])
+            if let rawCountdown = condition["countdown"] {
+                let countdown = try dictionary(rawCountdown, path: "\(path).countdown")
                 try section(
-                    timer["sausage"],
-                    path: "\(path).timer.sausage",
+                    countdown["bar"],
+                    path: "\(path).countdown.bar",
                     allowed: ["fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb", "back_height_degrees", "back_corner_radius_degrees"]
-                )
-                try section(
-                    timer["metronome"],
-                    path: "\(path).timer.metronome",
-                    allowed: ["min_beats_per_minute", "max_beats_per_minute", "increment_interval_beats", "volume"]
                 )
             }
             try section(condition["feedback_sounds"], path: "\(path).feedback_sounds", allowed: ["correct", "wrong"])

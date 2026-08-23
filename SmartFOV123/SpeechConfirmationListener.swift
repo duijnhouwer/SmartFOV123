@@ -1,6 +1,14 @@
 import AVFoundation
+import Dispatch
 import Foundation
 import Speech
+
+struct TimedSpeechSegment: Sendable {
+    let id: String
+    let text: String
+    let startUptimeNanoseconds: UInt64
+    let stopUptimeNanoseconds: UInt64
+}
 
 /// Routes the permanent microphone tap to whichever recognition request is
 /// currently active. The audio-render callback isn't main-actor isolated, so
@@ -74,7 +82,7 @@ final class SpeechConfirmationListener {
     }
 
     func start(
-        onTranscription: @escaping (String) -> Void,
+        onTranscription: @escaping (String, [TimedSpeechSegment]) -> Void,
         onEnded: @escaping (Error?) -> Void
     ) async throws {
         stopRecognitionPass()
@@ -95,7 +103,7 @@ final class SpeechConfirmationListener {
         request.contextualStrings = [
             "zero", "one", "two", "three", "four",
             "five", "six", "seven", "eight", "nine",
-            "yes", "no", "begin"
+            "yes", "no", "begin", "stop"
         ]
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
@@ -127,13 +135,24 @@ final class SpeechConfirmationListener {
         }
 
         recognitionRequest = request
+        let recognitionStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
         audioBufferSink.route(to: request)
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            if let transcript = result?.bestTranscription.formattedString {
+            if let transcription = result?.bestTranscription {
+                let segments = transcription.segments.enumerated().map { index, segment in
+                    let startOffset = UInt64(max(0, segment.timestamp) * 1_000_000_000)
+                    let stopOffset = UInt64(max(0, segment.timestamp + segment.duration) * 1_000_000_000)
+                    return TimedSpeechSegment(
+                        id: "\(pass)-\(index)",
+                        text: segment.substring,
+                        startUptimeNanoseconds: recognitionStartUptimeNanoseconds + startOffset,
+                        stopUptimeNanoseconds: recognitionStartUptimeNanoseconds + stopOffset
+                    )
+                }
                 Task { @MainActor [weak self] in
                     guard self?.sessionID == currentSessionID else { return }
-                    onTranscription(transcript)
+                    onTranscription(transcription.formattedString, segments)
                 }
             }
 
