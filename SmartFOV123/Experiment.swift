@@ -208,7 +208,7 @@ struct SpeechConfiguration: Decodable, Encodable, Sendable {
 
 struct StimulusConfiguration: Sendable {
     let eye: StimulusEye
-    let randomSeed: UInt64
+    var randomSeed: UInt64
 
     let digitHeightArcmin: Float
     let digitFontName: String
@@ -272,7 +272,7 @@ struct StimulusConfiguration: Sendable {
 
 struct ExperimentConfiguration: Sendable {
     let display: DisplayConfiguration
-    let stimulus: StimulusConfiguration
+    var stimulus: StimulusConfiguration
 }
 
 struct NumberGrid: Sendable {
@@ -313,17 +313,25 @@ struct ScheduledTrial: Sendable {
     let conditionNumber: Int
     let blockNumber: Int
     let configuration: ExperimentConfiguration
+    let reshufflesSeedOnPresentation: Bool
 
     func instantiate(trialNumber: Int? = nil) -> Experiment {
-        let seed = configuration.stimulus.randomSeed
+        let seed: UInt64
+        if reshufflesSeedOnPresentation {
+            seed = UInt64.random(in: .min ... .max)
+        } else {
+            seed = configuration.stimulus.randomSeed
+        }
+        var instantiatedConfiguration = configuration
+        instantiatedConfiguration.stimulus.randomSeed = seed
         return Experiment(
             trialNumber: trialNumber ?? self.trialNumber,
             conditionNumber: conditionNumber,
             blockNumber: blockNumber,
             randomSeed: seed,
-            configuration: configuration,
+            configuration: instantiatedConfiguration,
             grid: NumberGridGenerator.makeGrid(
-                using: configuration.stimulus,
+                using: instantiatedConfiguration.stimulus,
                 randomSeed: seed
             )
         )
@@ -947,6 +955,7 @@ private struct ExpandedCondition {
     let number: Int
     let blockNumber: Int
     let seed: UInt64
+    let reshufflesSeedOnPresentation: Bool
     let patch: ResolvedConditionPatch
 }
 
@@ -1054,6 +1063,7 @@ private enum ConditionResolver {
                         number: conditionNumber,
                         blockNumber: blockNumber,
                         seed: seed,
+                        reshufflesSeedOnPresentation: seedSpecification == .shuffle,
                         patch: patch
                     )
                 )
@@ -1073,7 +1083,8 @@ private enum ConditionResolver {
                 trialNumber: offset + 1,
                 conditionNumber: condition.number,
                 blockNumber: condition.blockNumber,
-                configuration: configuration
+                configuration: configuration,
+                reshufflesSeedOnPresentation: condition.reshufflesSeedOnPresentation
             )
         }
         let gridSizes = Set(trials.map { trial in
