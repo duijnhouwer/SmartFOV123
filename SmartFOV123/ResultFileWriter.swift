@@ -441,7 +441,9 @@ private struct CompletedTrial: Encodable {
                 randomMethod: stimulus.digitRandomMethod.rawValue,
                 highlightCorrectRGB: stimulus.digitHighlightCorrectRGB.array,
                 highlightWrongRGB: stimulus.digitHighlightWrongRGB.array,
-                highlightFont: stimulus.digitHighlightFontName
+                highlightFont: stimulus.digitHighlightFontName,
+                postStopVisibilitySeconds: stimulus.postStopVisibilitySeconds,
+                maskingCharacter: stimulus.maskingCharacter
             )
             annotation = .init(
                 heightDegrees: stimulus.annotationHeightArcmin / 60,
@@ -519,6 +521,8 @@ private struct CompletedTrial: Encodable {
         let highlightCorrectRGB: [Float]
         let highlightWrongRGB: [Float]
         let highlightFont: String
+        let postStopVisibilitySeconds: Float
+        let maskingCharacter: String
 
         private enum CodingKeys: String, CodingKey {
             case rgb
@@ -528,6 +532,8 @@ private struct CompletedTrial: Encodable {
             case highlightCorrectRGB = "highlight_correct_rgb"
             case highlightWrongRGB = "highlight_wrong_rgb"
             case highlightFont = "highlight_font"
+            case postStopVisibilitySeconds = "post_stop_visibility_seconds"
+            case maskingCharacter = "masking_character"
         }
     }
 
@@ -774,7 +780,7 @@ private enum JSONPrettyPrinter {
                 "back_height_degrees", "back_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("font_name") {
-            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "highlight_font"]
+            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "highlight_font", "post_stop_visibility_seconds", "masking_character"]
         } else if dictionary.keys.contains("number_horizontal") {
             preferredOrder = [
                 "width_degrees", "height_degrees", "gutter_degrees", "corner_radius_degrees",

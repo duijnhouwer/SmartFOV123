@@ -197,6 +197,8 @@ struct StimulusConfiguration: Sendable {
     let digitHighlightCorrectRGB: RGB
     let digitHighlightWrongRGB: RGB
     let digitHighlightFontName: String
+    let postStopVisibilitySeconds: Float
+    let maskingCharacter: String
 
     let annotationHeightArcmin: Float
     let annotationFontName: String
@@ -623,6 +625,8 @@ private struct DigitPatch: Decodable {
     let highlightCorrectRGB: RGB?
     let highlightWrongRGB: RGB?
     let highlightFont: String?
+    let postStopVisibilitySeconds: Float?
+    let maskingCharacter: String?
 
     private enum CodingKeys: String, CodingKey {
         case heightDegrees = "height_degrees"
@@ -632,6 +636,8 @@ private struct DigitPatch: Decodable {
         case highlightCorrectRGB = "highlight_correct_rgb"
         case highlightWrongRGB = "highlight_wrong_rgb"
         case highlightFont = "highlight_font"
+        case postStopVisibilitySeconds = "post_stop_visibility_seconds"
+        case maskingCharacter = "masking_character"
     }
 }
 
@@ -801,6 +807,9 @@ private struct ResolvedConditionPatch {
             digits.highlightCorrectRGB = patch.highlightCorrectRGB ?? digits.highlightCorrectRGB
             digits.highlightWrongRGB = patch.highlightWrongRGB ?? digits.highlightWrongRGB
             digits.highlightFont = patch.highlightFont ?? digits.highlightFont
+            digits.postStopVisibilitySeconds = patch.postStopVisibilitySeconds
+                ?? digits.postStopVisibilitySeconds
+            digits.maskingCharacter = patch.maskingCharacter ?? digits.maskingCharacter
         }
         if let patch = definition.annotation {
             annotation.heightDegrees = patch.heightDegrees ?? annotation.heightDegrees
@@ -871,6 +880,8 @@ private struct ResolvedDigits {
     var highlightCorrectRGB: RGB?
     var highlightWrongRGB: RGB?
     var highlightFont: String?
+    var postStopVisibilitySeconds: Float?
+    var maskingCharacter: String?
 }
 
 private struct ResolvedAnnotation {
@@ -1117,6 +1128,17 @@ private enum ConditionResolver {
         guard patch.digits.highlightWrongRGB != nil else { try missing("digits.highlight_wrong_rgb") }
         guard let highlightFont = patch.digits.highlightFont else {
             try missing("digits.highlight_font")
+        }
+        guard let postStopVisibilitySeconds = patch.digits.postStopVisibilitySeconds else {
+            try missing("digits.post_stop_visibility_seconds")
+        }
+        guard postStopVisibilitySeconds.isFinite, postStopVisibilitySeconds >= 0 else {
+            throw invalid(definitionName, "digits.post_stop_visibility_seconds must be finite and at least zero.")
+        }
+        guard let maskingCharacter = patch.digits.maskingCharacter,
+              maskingCharacter.count == 1,
+              !maskingCharacter.unicodeScalars.contains(where: CharacterSet.newlines.contains) else {
+            throw invalid(definitionName, "digits.masking_character must be exactly one non-newline character.")
         }
         guard let annotationHeight = patch.annotation.heightDegrees else {
             try missing("annotation.height_degrees")
@@ -1445,6 +1467,8 @@ private enum ConditionResolver {
                 digitHighlightCorrectRGB: patch.digits.highlightCorrectRGB!,
                 digitHighlightWrongRGB: patch.digits.highlightWrongRGB!,
                 digitHighlightFontName: patch.digits.highlightFont!,
+                postStopVisibilitySeconds: patch.digits.postStopVisibilitySeconds!,
+                maskingCharacter: patch.digits.maskingCharacter!,
                 annotationHeightArcmin: patch.annotation.heightDegrees! * 60,
                 annotationFontName: patch.annotation.fontName!,
                 annotationFontRGB: patch.annotation.fontRGB!,
@@ -1557,7 +1581,7 @@ private enum JSONShapeValidator {
             try section(
                 condition["digits"],
                 path: "\(path).digits",
-                allowed: ["height_degrees", "font_name", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "highlight_font"]
+                allowed: ["height_degrees", "font_name", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "highlight_font", "post_stop_visibility_seconds", "masking_character"]
             )
             try section(
                 condition["annotation"],

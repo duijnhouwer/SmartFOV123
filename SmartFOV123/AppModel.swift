@@ -40,6 +40,7 @@ final class AppModel {
     }
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
+    private var postStopMaskTask: Task<Void, Never>?
     private var keyboardDigits = ""
     private var backgroundObserverTask: Task<Void, Never>?
     private var sceneDeactivationObserverTask: Task<Void, Never>?
@@ -261,6 +262,8 @@ final class AppModel {
     }
 
     func showConfigurationError(_ message: String) {
+        postStopMaskTask?.cancel()
+        postStopMaskTask = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         speechListener.stop()
@@ -356,6 +359,8 @@ final class AppModel {
     }
 
     func markCurrentTrialStarted() {
+        postStopMaskTask?.cancel()
+        postStopMaskTask = nil
         currentTrialMeasurement = .init(startTimeMS: elapsedMilliseconds())
         DiagnosticLog.event("trial", "measurement started; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase))")
     }
@@ -460,7 +465,10 @@ final class AppModel {
            let stopSegment = segments.first(where: {
                $0.text.lowercased().split(whereSeparator: { !$0.isLetter }).contains("stop")
            }) {
-            stopSearchTimer(atMS: elapsedMilliseconds(atUptimeNanoseconds: stopSegment.startUptimeNanoseconds))
+            stopSearchTimer(
+                atMS: elapsedMilliseconds(atUptimeNanoseconds: stopSegment.startUptimeNanoseconds),
+                atUptimeNanoseconds: stopSegment.startUptimeNanoseconds
+            )
             speechListener.pauseForFeedback()
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
             return
@@ -594,15 +602,52 @@ final class AppModel {
         handleTrialCandidate(candidate, spoken: false)
     }
 
-    private func stopSearchTimer(atMS milliseconds: UInt64) {
+    private func stopSearchTimer(
+        atMS milliseconds: UInt64,
+        atUptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
+    ) {
         guard trialPhase == .search,
               currentTrialMeasurement?.stopSignalStartMS == nil else { return }
         currentTrialMeasurement?.stopSignalStartMS = milliseconds
         pauseTimedSession()
+        schedulePostStopMask(
+            atUptimeNanoseconds: atUptimeNanoseconds,
+            afterSeconds: instantiatedExperiment?.configuration.stimulus.postStopVisibilitySeconds ?? 0
+        )
         statusMessage = "Timer stopped. Enter the three crossing digits."
     }
 
+    private func schedulePostStopMask(
+        atUptimeNanoseconds stopUptimeNanoseconds: UInt64,
+        afterSeconds visibilitySeconds: Float
+    ) {
+        postStopMaskTask?.cancel()
+        let visibilityNanoseconds = UInt64(Double(visibilitySeconds) * 1_000_000_000)
+        let now = DispatchTime.now().uptimeNanoseconds
+        let deadline = stopUptimeNanoseconds.addingReportingOverflow(visibilityNanoseconds)
+        let remainingNanoseconds: UInt64
+        if deadline.overflow || deadline.partialValue <= now {
+            remainingNanoseconds = 0
+        } else {
+            remainingNanoseconds = deadline.partialValue - now
+        }
+        guard remainingNanoseconds > 0 else {
+            stimulusPresentationState.maskGrid()
+            return
+        }
+        postStopMaskTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: remainingNanoseconds)
+            guard !Task.isCancelled,
+                  let self,
+                  self.trialPhase == .search,
+                  self.currentTrialMeasurement?.stopSignalStartMS != nil else { return }
+            self.stimulusPresentationState.maskGrid()
+        }
+    }
+
     func advanceAfterCompletedTrial() {
+        postStopMaskTask?.cancel()
+        postStopMaskTask = nil
         guard let plan, !hasTimedSessionEnded else { return }
         if plan.taskMode == .fixedNumberOfTrials,
            currentTrialIndex >= plan.trials.count {
@@ -1011,6 +1056,8 @@ final class AppModel {
     private func finishTimedSession(durationSeconds: Int) {
         guard !hasTimedSessionEnded else { return }
         hasTimedSessionEnded = true
+        postStopMaskTask?.cancel()
+        postStopMaskTask = nil
         DiagnosticLog.event("session", "timed session finishing; durationSeconds=\(durationSeconds) score=\(completedTargetCount)")
         stimulusPresentationState.stopTimeBar()
         countdownAudioPlayer.pause()

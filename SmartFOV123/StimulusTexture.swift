@@ -302,7 +302,7 @@ struct StimulusTexture {
                         - tileHeight / 2
                 )
                 let glyph = presentation == .masked
-                    ? "X"
+                    ? config.maskingCharacter
                     : String(experiment.grid.digit(at: index))
                 Self.drawText(
                     glyph,

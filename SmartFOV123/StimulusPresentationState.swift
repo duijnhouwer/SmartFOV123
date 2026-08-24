@@ -151,6 +151,12 @@ final class StimulusPresentationState: @unchecked Sendable {
         }
     }
 
+    func maskGrid() {
+        lock.withLock {
+            currentContent = .maskedGrid
+        }
+    }
+
     func highlightSolution(correct: Bool) {
         lock.withLock {
             currentContent = .highlightedGrid(correct: correct)

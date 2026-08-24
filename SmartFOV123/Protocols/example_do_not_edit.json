@@ -36,7 +36,9 @@
       "random_method": "flat_distribution",
       "highlight_correct_rgb": [0, 1, 0],
       "highlight_wrong_rgb": [1, 0, 0],
-      "highlight_font": "Arial Bold"
+      "highlight_font": "Arial Bold",
+      "post_stop_visibility_seconds": 1.0,
+      "masking_character": "#"
     },
     "fov": {
       "eye": "right",
