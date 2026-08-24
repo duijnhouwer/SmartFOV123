@@ -6,10 +6,18 @@
   "debriefing": "Your score is <NUMBER_OF_TARGETS_FOUND>. Well done!\n\nPress the Digital Crown to exit",
   "foveated_rendering": true,
   "task_mode": "loop_trials_420_seconds",
+  "sounds": {
+      "reveal": { "file": "pop.caf", "volume": 0.5 },
+      "timer": { "file": "stopwatch.caf", "volume": 0.25},
+      "stop_timer": { "file": "tick.caf", "volume": 0.4},
+      "correct": { "file": "correct.caf", "volume": 0.5 },
+      "wrong": { "file": "wrong.caf", "volume": 0.5 },
+      "final": { "file": "gong.caf", "volume": 0.5}
+  },
   "input": {
-      "start_digits": "keyboard",
+      "start_digits": "speech",
       "stop_command": "keyboard_space",
-      "cross_digits": "keyboard",
+      "cross_digits": "speech",
       "speech": {
           "max_interdigit_pause_seconds": 1.0,
           "aliases": {
@@ -37,8 +45,8 @@
       "highlight_correct_rgb": [0, 1, 0],
       "highlight_wrong_rgb": [1, 0, 0],
       "highlight_font": "Arial Bold",
-      "post_stop_visibility_seconds": 1.0,
-      "masking_character": "#"
+      "post_stop_visibility_seconds": 1.75,
+      "masking_character": "X"
     },
     "fov": {
       "eye": "right",
@@ -74,21 +82,13 @@
       "font_name": "Arial",
       "font_rgb": [0, 0, 0]
     },
-    "countdown": {
-        "bar": {
-            "fill_rgb": [1, 1, 1],
-            "height_degrees": 0.5,
-            "corner_radius_degrees": 0.25,
-            "back_rgb": [0, 0, 0],
-            "back_height_degrees": 1.0,
-            "back_corner_radius_degrees": 0.5
-        },
-        "stopwatch_volume": 0.25,
-        "final_gong_volume": 0.5
-    },
-    "feedback_sounds": {
-        "correct": { "file": "correct.caf", "volume": 0.5 },
-        "wrong": { "file": "wrong.caf", "volume": 0.5 }
+    "timer_bar": {
+        "fill_rgb": [1, 1, 1],
+        "height_degrees": 0.5,
+        "corner_radius_degrees": 0.25,
+        "back_rgb": [0, 0, 0],
+        "back_height_degrees": 1.0,
+        "back_corner_radius_degrees": 0.5
     }
   },
   "conditions": [

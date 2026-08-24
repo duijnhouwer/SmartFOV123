@@ -106,6 +106,26 @@ struct InputConfiguration: Decodable, Encodable, Sendable {
     }
 }
 
+struct SoundEffectConfiguration: Decodable, Encodable, Sendable {
+    let file: String
+    let volume: Float
+}
+
+struct SoundsConfiguration: Decodable, Encodable, Sendable {
+    let reveal: SoundEffectConfiguration
+    let stopTimer: SoundEffectConfiguration
+    let correct: SoundEffectConfiguration
+    let wrong: SoundEffectConfiguration
+    let timer: SoundEffectConfiguration
+    let final: SoundEffectConfiguration
+
+    private enum CodingKeys: String, CodingKey {
+        case reveal
+        case stopTimer = "stop_timer"
+        case correct, wrong, timer, final
+    }
+}
+
 enum TaskMode: Equatable, Sendable {
     case fixedNumberOfTrials
     case loopTrials(seconds: Int)
@@ -210,13 +230,6 @@ struct StimulusConfiguration: Sendable {
     let timeBarBackRGB: RGB
     let timeBarBackHeightArcmin: Float
     let timeBarBackCornerRadiusArcmin: Float
-    let stopwatchVolume: Float
-    let finalGongVolume: Float
-
-    let correctFeedbackFile: String
-    let correctFeedbackVolume: Float
-    let wrongFeedbackFile: String
-    let wrongFeedbackVolume: Float
 
     let tileWidthArcmin: Float
     let tileHeightArcmin: Float
@@ -324,6 +337,7 @@ struct ExperimentPlan: Sendable {
     let debriefingTitle: String
     let debriefing: String
     let taskMode: TaskMode
+    let sounds: SoundsConfiguration
     let input: InputConfiguration
     /// Compositor-layer configuration is fixed for the duration of a session,
     /// so this option applies consistently to every trial in the plan.
@@ -338,6 +352,7 @@ struct ExperimentPlan: Sendable {
             debriefingTitle: debriefingTitle,
             debriefing: debriefing,
             taskMode: taskMode,
+            sounds: sounds,
             input: input,
             foveatedRendering: foveatedRendering,
             trials: trials
@@ -572,6 +587,7 @@ private struct ExperimentFile: Decodable {
     let debriefingTitle: String
     let debriefing: String
     let taskMode: TaskMode
+    let sounds: SoundsConfiguration
     let input: InputConfiguration
     let foveatedRendering: Bool?
     let masterConditionTemplate: ConditionDefinition
@@ -584,6 +600,7 @@ private struct ExperimentFile: Decodable {
         case debriefingTitle = "debriefing_title"
         case debriefing
         case taskMode = "task_mode"
+        case sounds
         case input
         case foveatedRendering = "foveated_rendering"
         case masterConditionTemplate = "master_condition_template"
@@ -763,8 +780,7 @@ private struct ConditionDefinition: Decodable {
     let passthroughDimming: Double?
     let digits: DigitPatch?
     let annotation: AnnotationPatch?
-    let countdown: CountdownPatch?
-    let feedbackSounds: FeedbackSoundsPatch?
+    let timerBar: CountdownBarPatch?
     let tiles: TilePatch?
     let surround: SurroundPatch?
     let fov: FOVPatch?
@@ -774,7 +790,7 @@ private struct ConditionDefinition: Decodable {
         case randomSeed = "random_seed"
         case passthroughDimming = "passthrough_dimming"
         case blockNumber = "block_nr"
-        case digits, annotation, countdown, feedbackSounds = "feedback_sounds", tiles, surround, fov
+        case digits, annotation, timerBar = "timer_bar", tiles, surround, fov
     }
 
 }
@@ -787,8 +803,6 @@ private struct ResolvedConditionPatch {
     var digits = ResolvedDigits()
     var annotation = ResolvedAnnotation()
     var timeBar = ResolvedTimeBar()
-    var countdownAudio = ResolvedCountdownAudio()
-    var feedbackSounds = ResolvedFeedbackSounds()
     var tiles = ResolvedTiles()
     var surround = ResolvedSurround()
     var fov = ResolvedFOV()
@@ -816,27 +830,13 @@ private struct ResolvedConditionPatch {
             annotation.fontName = patch.fontName ?? annotation.fontName
             annotation.fontRGB = patch.fontRGB ?? annotation.fontRGB
         }
-        if let patch = definition.countdown?.bar {
+        if let patch = definition.timerBar {
             timeBar.fillRGB = patch.fillRGB ?? timeBar.fillRGB
             timeBar.heightDegrees = patch.heightDegrees ?? timeBar.heightDegrees
-            timeBar.cornerRadiusDegrees = patch.cornerRadiusDegrees
-                ?? timeBar.cornerRadiusDegrees
+            timeBar.cornerRadiusDegrees = patch.cornerRadiusDegrees ?? timeBar.cornerRadiusDegrees
             timeBar.backRGB = patch.backRGB ?? timeBar.backRGB
             timeBar.backHeightDegrees = patch.backHeightDegrees ?? timeBar.backHeightDegrees
-            timeBar.backCornerRadiusDegrees = patch.backCornerRadiusDegrees
-                ?? timeBar.backCornerRadiusDegrees
-        }
-        countdownAudio.stopwatchVolume = definition.countdown?.stopwatchVolume
-            ?? countdownAudio.stopwatchVolume
-        countdownAudio.finalGongVolume = definition.countdown?.finalGongVolume
-            ?? countdownAudio.finalGongVolume
-        if let patch = definition.feedbackSounds?.correct {
-            feedbackSounds.correctFile = patch.file ?? feedbackSounds.correctFile
-            feedbackSounds.correctVolume = patch.volume ?? feedbackSounds.correctVolume
-        }
-        if let patch = definition.feedbackSounds?.wrong {
-            feedbackSounds.wrongFile = patch.file ?? feedbackSounds.wrongFile
-            feedbackSounds.wrongVolume = patch.volume ?? feedbackSounds.wrongVolume
+            timeBar.backCornerRadiusDegrees = patch.backCornerRadiusDegrees ?? timeBar.backCornerRadiusDegrees
         }
         if let patch = definition.tiles {
             tiles.widthDegrees = patch.widthDegrees ?? tiles.widthDegrees
@@ -970,6 +970,7 @@ private enum ConditionResolver {
                 "subject_number_digit_count must be between 1 and 12."
             )
         }
+        try validateSounds(file.sounds)
         let instructions = file.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !instructions.isEmpty, instructions == file.instructions else {
             throw ExperimentError.invalidConfiguration(
@@ -1107,6 +1108,7 @@ private enum ConditionResolver {
             debriefingTitle: debriefingTitle,
             debriefing: debriefing,
             taskMode: file.taskMode,
+            sounds: file.sounds,
             input: file.input,
             foveatedRendering: file.foveatedRendering ?? true,
             trials: trials
@@ -1147,41 +1149,23 @@ private enum ConditionResolver {
             try missing("annotation.font_name")
         }
         guard patch.annotation.fontRGB != nil else { try missing("annotation.font_rgb") }
-        guard patch.timeBar.fillRGB != nil else { try missing("countdown.bar.fill_rgb") }
+        guard patch.timeBar.fillRGB != nil else { try missing("timer_bar.fill_rgb") }
         guard let timeBarHeight = patch.timeBar.heightDegrees else {
-            try missing("countdown.bar.height_degrees")
+            try missing("timer_bar.height_degrees")
         }
         guard let timeBarCornerRadius = patch.timeBar.cornerRadiusDegrees else {
-            try missing("countdown.bar.corner_radius_degrees")
+            try missing("timer_bar.corner_radius_degrees")
         }
-        guard patch.timeBar.backRGB != nil else { try missing("countdown.bar.back_rgb") }
+        guard patch.timeBar.backRGB != nil else { try missing("timer_bar.back_rgb") }
         guard let timeBarBackHeight = patch.timeBar.backHeightDegrees else {
-            try missing("countdown.bar.back_height_degrees")
-        }
-        guard let stopwatchVolume = patch.countdownAudio.stopwatchVolume else {
-            try missing("countdown.stopwatch_volume")
-        }
-        guard let finalGongVolume = patch.countdownAudio.finalGongVolume else {
-            try missing("countdown.final_gong_volume")
-        }
-        guard let correctFeedbackFile = patch.feedbackSounds.correctFile else {
-            try missing("feedback_sounds.correct.file")
-        }
-        guard let correctFeedbackVolume = patch.feedbackSounds.correctVolume else {
-            try missing("feedback_sounds.correct.volume")
-        }
-        guard let wrongFeedbackFile = patch.feedbackSounds.wrongFile else {
-            try missing("feedback_sounds.wrong.file")
-        }
-        guard let wrongFeedbackVolume = patch.feedbackSounds.wrongVolume else {
-            try missing("feedback_sounds.wrong.volume")
+            try missing("timer_bar.back_height_degrees")
         }
         guard let tileWidth = patch.tiles.widthDegrees else { try missing("tiles.width_degrees") }
         guard let tileHeight = patch.tiles.heightDegrees else { try missing("tiles.height_degrees") }
         guard let tileGutter = patch.tiles.gutterDegrees else { try missing("tiles.gutter_degrees") }
         guard let tileCornerRadius = patch.tiles.cornerRadiusDegrees else { try missing("tiles.corner_radius_degrees") }
         guard let timeBarBackCornerRadius = patch.timeBar.backCornerRadiusDegrees else {
-            try missing("countdown.bar.back_corner_radius_degrees")
+            try missing("timer_bar.back_corner_radius_degrees")
         }
         guard patch.tiles.fillRGB != nil else { try missing("tiles.fill_rgb") }
         guard patch.tiles.gutterRGB != nil else { try missing("tiles.gutter_rgb") }
@@ -1213,8 +1197,8 @@ private enum ConditionResolver {
         let positive: [(String, Float)] = [
             ("digits.height_degrees", digitHeight),
             ("annotation.height_degrees", annotationHeight),
-            ("countdown.bar.height_degrees", timeBarHeight),
-            ("countdown.bar.back_height_degrees", timeBarBackHeight),
+            ("timer_bar.height_degrees", timeBarHeight),
+            ("timer_bar.back_height_degrees", timeBarBackHeight),
             ("tiles.width_degrees", tileWidth),
             ("tiles.height_degrees", tileHeight),
             ("fov.width_degrees", fovWidth),
@@ -1237,8 +1221,8 @@ private enum ConditionResolver {
         let nonnegative: [(String, Float)] = [
             ("tiles.gutter_degrees", tileGutter),
             ("tiles.corner_radius_degrees", tileCornerRadius),
-            ("countdown.bar.corner_radius_degrees", timeBarCornerRadius),
-            ("countdown.bar.back_corner_radius_degrees", timeBarBackCornerRadius),
+            ("timer_bar.corner_radius_degrees", timeBarCornerRadius),
+            ("timer_bar.back_corner_radius_degrees", timeBarBackCornerRadius),
             ("surround.inner_margin_degrees", surroundInnerMargin),
             ("surround.inner_corner_radius_degrees", surroundInnerCornerRadius),
             ("surround.outer_corner_radius_degrees", surroundOuterCornerRadius)
@@ -1271,23 +1255,10 @@ private enum ConditionResolver {
             throw invalid(definitionName, "tiles.corner_radius_degrees is too large for the tiles.")
         }
         guard timeBarCornerRadius * 2 <= timeBarHeight else {
-            throw invalid(definitionName, "countdown.bar.corner_radius_degrees is too large for height_degrees.")
+            throw invalid(definitionName, "timer_bar.corner_radius_degrees is too large for height_degrees.")
         }
         guard timeBarBackCornerRadius * 2 <= timeBarBackHeight else {
-            throw invalid(definitionName, "countdown.bar.back_corner_radius_degrees is too large for back_height_degrees.")
-        }
-        guard stopwatchVolume.isFinite, (0...1).contains(stopwatchVolume) else {
-            throw invalid(
-                definitionName,
-                "countdown.stopwatch_volume must be finite and between zero and one."
-            )
-        }
-        for (name, volume) in [
-            ("countdown.final_gong_volume", finalGongVolume),
-            ("feedback_sounds.correct.volume", correctFeedbackVolume),
-            ("feedback_sounds.wrong.volume", wrongFeedbackVolume)
-        ] where !volume.isFinite || !(0...1).contains(volume) {
-            throw invalid(definitionName, "\(name) must be finite and between zero and one.")
+            throw invalid(definitionName, "timer_bar.back_corner_radius_degrees is too large for back_height_degrees.")
         }
         let gridWidth = tileWidth * Float(columns)
             + tileGutter * Float(columns - 1) + surroundInnerMargin * 2
@@ -1319,7 +1290,7 @@ private enum ConditionResolver {
         guard spaceAboveCenteredGrid >= timeBarBackHeight else {
             throw invalid(
                 definitionName,
-                "fov.height_degrees leaves insufficient space below the centered tile grid for countdown.bar.back_height_degrees."
+                "fov.height_degrees leaves insufficient space below the centered tile grid for timer_bar.back_height_degrees."
             )
         }
         guard !fontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1340,15 +1311,6 @@ private enum ConditionResolver {
                 "digits.highlight_font ‘\(highlightFont)’ is not installed on this device."
             )
         }
-        for (name, file) in [
-            ("feedback_sounds.correct.file", correctFeedbackFile),
-            ("feedback_sounds.wrong.file", wrongFeedbackFile)
-        ] {
-            guard !file.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  file == file.trimmingCharacters(in: .whitespacesAndNewlines) else {
-                throw invalid(definitionName, "\(name) must be a nonempty filename without surrounding whitespace.")
-            }
-        }
         guard !annotationFontName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw invalid(definitionName, "annotation.font_name must not be empty.")
         }
@@ -1359,6 +1321,24 @@ private enum ConditionResolver {
             )
         }
     }
+
+    private static func validateSounds(_ sounds: SoundsConfiguration) throws {
+        for (name, sound) in [
+            ("sounds.reveal", sounds.reveal),
+            ("sounds.stop_timer", sounds.stopTimer),
+            ("sounds.correct", sounds.correct), ("sounds.wrong", sounds.wrong),
+            ("sounds.timer", sounds.timer), ("sounds.final", sounds.final)
+        ] {
+            guard !sound.file.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  sound.file == sound.file.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                throw ExperimentError.invalidConfiguration("\(name).file must be a nonempty filename without surrounding whitespace.")
+            }
+            guard sound.volume.isFinite, (0...1).contains(sound.volume) else {
+                throw ExperimentError.invalidConfiguration("\(name).volume must be finite and between zero and one.")
+            }
+        }
+    }
+
 
     private static func validateSpeech(_ speech: SpeechConfiguration) throws {
         let requiredDigitKeys = Set((0...9).map(String.init))
@@ -1478,12 +1458,6 @@ private enum ConditionResolver {
                 timeBarBackRGB: patch.timeBar.backRGB!,
                 timeBarBackHeightArcmin: patch.timeBar.backHeightDegrees! * 60,
                 timeBarBackCornerRadiusArcmin: patch.timeBar.backCornerRadiusDegrees! * 60,
-                stopwatchVolume: patch.countdownAudio.stopwatchVolume!,
-                finalGongVolume: patch.countdownAudio.finalGongVolume!,
-                correctFeedbackFile: patch.feedbackSounds.correctFile!,
-                correctFeedbackVolume: patch.feedbackSounds.correctVolume!,
-                wrongFeedbackFile: patch.feedbackSounds.wrongFile!,
-                wrongFeedbackVolume: patch.feedbackSounds.wrongVolume!,
                 tileWidthArcmin: patch.tiles.widthDegrees! * 60,
                 tileHeightArcmin: patch.tiles.heightDegrees! * 60,
                 tileGutterArcmin: patch.tiles.gutterDegrees! * 60,
@@ -1527,12 +1501,19 @@ private enum JSONShapeValidator {
             allowed: [
                 "schema_version", "subject_number_digit_count",
                 "instructions", "debriefing_title", "debriefing", "foveated_rendering", "task_mode",
-                "input", "master_condition_template", "conditions"
+                "sounds", "input", "master_condition_template", "conditions"
             ],
             path: "$"
         )
         guard let rawInput = root["input"] else {
             throw invalid("$.input", "is required.")
+        }
+        try section(root["sounds"], path: "$.sounds", allowed: ["reveal", "stop_timer", "correct", "wrong", "timer", "final"])
+        if let rawSounds = root["sounds"] {
+            let sounds = try dictionary(rawSounds, path: "$.sounds")
+            for name in ["reveal", "stop_timer", "correct", "wrong", "timer", "final"] {
+                try section(sounds[name], path: "$.sounds.\(name)", allowed: ["file", "volume"])
+            }
         }
         try section(
             rawInput,
@@ -1572,7 +1553,7 @@ private enum JSONShapeValidator {
     ) throws {
             let condition = try dictionary(rawDefinition, path: path)
             var allowed: Set<String> = [
-                "random_seed", "passthrough_dimming", "digits", "annotation", "countdown", "feedback_sounds", "tiles", "surround", "fov"
+                "random_seed", "passthrough_dimming", "digits", "annotation", "timer_bar", "tiles", "surround", "fov"
             ]
             if schedulingFields {
                 allowed.formUnion(["block_nr", "repeats"])
@@ -1588,21 +1569,11 @@ private enum JSONShapeValidator {
                 path: "\(path).annotation",
                 allowed: ["height_degrees", "font_name", "font_rgb"]
             )
-            try section(condition["countdown"], path: "\(path).countdown", allowed: ["bar", "stopwatch_volume", "final_gong_volume"])
-            if let rawCountdown = condition["countdown"] {
-                let countdown = try dictionary(rawCountdown, path: "\(path).countdown")
-                try section(
-                    countdown["bar"],
-                    path: "\(path).countdown.bar",
-                    allowed: ["fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb", "back_height_degrees", "back_corner_radius_degrees"]
-                )
-            }
-            try section(condition["feedback_sounds"], path: "\(path).feedback_sounds", allowed: ["correct", "wrong"])
-            if let rawFeedback = condition["feedback_sounds"] {
-                let feedback = try dictionary(rawFeedback, path: "\(path).feedback_sounds")
-                try section(feedback["correct"], path: "\(path).feedback_sounds.correct", allowed: ["file", "volume"])
-                try section(feedback["wrong"], path: "\(path).feedback_sounds.wrong", allowed: ["file", "volume"])
-            }
+            try section(
+                condition["timer_bar"],
+                path: "\(path).timer_bar",
+                allowed: ["fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb", "back_height_degrees", "back_corner_radius_degrees"]
+            )
             try section(
                 condition["tiles"],
                 path: "\(path).tiles",

@@ -24,6 +24,7 @@ final class ResultFileWriter {
         subjectNumber: String,
         taskMode: TaskMode,
         input: InputConfiguration,
+        sounds: SoundsConfiguration,
         forcedVoiceInput: Bool,
         startDate: Date? = nil
     ) {
@@ -33,6 +34,7 @@ final class ResultFileWriter {
             subjectNumber: subjectNumber,
             taskMode: taskMode,
             input: input,
+            sounds: sounds,
             forcedVoiceInput: forcedVoiceInput,
             startDate: startDate
         )
@@ -209,6 +211,7 @@ private struct ResultExperiment: Encodable {
     let subjectNumber: String
     let taskMode: String?
     let input: InputConfiguration
+    let sounds: SoundsConfiguration
     let forcedVoiceInput: Bool
     let startDate: String
     let startTime: String
@@ -219,6 +222,7 @@ private struct ResultExperiment: Encodable {
         subjectNumber: String,
         taskMode: TaskMode,
         input: InputConfiguration,
+        sounds: SoundsConfiguration,
         forcedVoiceInput: Bool,
         startDate: Date
     ) {
@@ -226,6 +230,7 @@ private struct ResultExperiment: Encodable {
         self.subjectNumber = subjectNumber
         self.taskMode = taskMode.durationSeconds == nil ? nil : taskMode.rawValue
         self.input = input
+        self.sounds = sounds
         self.forcedVoiceInput = forcedVoiceInput
         timestamp = startDate
 
@@ -250,6 +255,7 @@ private struct ResultExperiment: Encodable {
         case subjectNumber = "subject_number"
         case taskMode = "task_mode"
         case input
+        case sounds
         case forcedVoiceInput = "forced_voice_input"
         case startDate = "start_date"
         case startTime = "start_time"
@@ -257,38 +263,44 @@ private struct ResultExperiment: Encodable {
 }
 
 struct CompletedTrialResults: Encodable {
-    let absoluteStartTimeMS: UInt64
+    let absoluteTrialStartMS: UInt64
     let digitRevealMS: Int64
+    let timerStartMS: Int64
     let stopSignalStartMS: Int64
+    let timerStopMS: Int64
     let answerCorrect: Bool
     let speech: [SpeechDetection]
     let keyboard: [KeyboardDetection]
 
     init(
-        startTimeMS: UInt64,
+        absoluteTrialStartMS: UInt64,
         digitRevealMS: UInt64,
+        timerStartMS: UInt64,
         stopSignalStartMS: UInt64,
+        timerStopMS: UInt64,
         answerCorrect: Bool,
         speech: [SpeechDetection],
         keyboard: [KeyboardDetection]
     ) {
-        absoluteStartTimeMS = startTimeMS
-        let signedStartTimeMS = Int64(startTimeMS)
-        self.digitRevealMS = Int64(digitRevealMS) - signedStartTimeMS
-        self.stopSignalStartMS = Int64(stopSignalStartMS) - signedStartTimeMS
+        self.absoluteTrialStartMS = absoluteTrialStartMS
+        let signedTrialStartMS = Int64(absoluteTrialStartMS)
+        self.digitRevealMS = Int64(digitRevealMS) - signedTrialStartMS
+        self.timerStartMS = Int64(timerStartMS) - signedTrialStartMS
+        self.stopSignalStartMS = Int64(stopSignalStartMS) - signedTrialStartMS
+        self.timerStopMS = Int64(timerStopMS) - signedTrialStartMS
         self.answerCorrect = answerCorrect
         self.speech = speech.map {
             .init(
                 id: $0.id,
                 token: $0.token,
-                startMS: $0.startMS - signedStartTimeMS,
-                stopMS: $0.stopMS - signedStartTimeMS
+                startMS: $0.startMS - signedTrialStartMS,
+                stopMS: $0.stopMS - signedTrialStartMS
             )
         }
         self.keyboard = keyboard.map {
             .init(
                 key: $0.key,
-                startMS: $0.startMS - signedStartTimeMS
+                startMS: $0.startMS - signedTrialStartMS
             )
         }
     }
@@ -341,9 +353,11 @@ struct CompletedTrialResults: Encodable {
 
     private enum CodingKeys: String, CodingKey {
         case speech, keyboard
-        case absoluteStartTimeMS = "absolute_start_time_ms"
+        case absoluteTrialStartMS = "absolute_trial_start_ms"
         case digitRevealMS = "digit_reveal_ms"
+        case timerStartMS = "timer_start_ms"
         case stopSignalStartMS = "stop_signal_start_ms"
+        case timerStopMS = "timer_stop_ms"
         case answerCorrect = "answer_correct"
     }
 }
@@ -421,8 +435,7 @@ private struct CompletedTrial: Encodable {
         let passthroughDimming: Double
         let digits: Digits
         let annotation: Annotation
-        let countdown: Countdown
-        let feedbackSounds: FeedbackSounds
+        let timerBar: TimerBar
         let tiles: Tiles
         let surround: Surround
         let fov: FOV
@@ -450,27 +463,13 @@ private struct CompletedTrial: Encodable {
                 fontName: stimulus.annotationFontName,
                 fontRGB: stimulus.annotationFontRGB.array
             )
-            countdown = .init(
-                bar: .init(
-                    fillRGB: stimulus.timeBarFillRGB.array,
-                    heightDegrees: stimulus.timeBarHeightArcmin / 60,
-                    cornerRadiusDegrees: stimulus.timeBarCornerRadiusArcmin / 60,
-                    backRGB: stimulus.timeBarBackRGB.array,
-                    backHeightDegrees: stimulus.timeBarBackHeightArcmin / 60,
-                    backCornerRadiusDegrees: stimulus.timeBarBackCornerRadiusArcmin / 60
-                ),
-                stopwatchVolume: stimulus.stopwatchVolume,
-                finalGongVolume: stimulus.finalGongVolume
-            )
-            feedbackSounds = .init(
-                correct: .init(
-                    file: stimulus.correctFeedbackFile,
-                    volume: stimulus.correctFeedbackVolume
-                ),
-                wrong: .init(
-                    file: stimulus.wrongFeedbackFile,
-                    volume: stimulus.wrongFeedbackVolume
-                )
+            timerBar = .init(
+                fillRGB: stimulus.timeBarFillRGB.array,
+                heightDegrees: stimulus.timeBarHeightArcmin / 60,
+                cornerRadiusDegrees: stimulus.timeBarCornerRadiusArcmin / 60,
+                backRGB: stimulus.timeBarBackRGB.array,
+                backHeightDegrees: stimulus.timeBarBackHeightArcmin / 60,
+                backCornerRadiusDegrees: stimulus.timeBarBackCornerRadiusArcmin / 60
             )
             tiles = .init(
                 widthDegrees: stimulus.tileWidthArcmin / 60,
@@ -504,8 +503,7 @@ private struct CompletedTrial: Encodable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case digits, annotation, countdown, tiles, surround, fov
-            case feedbackSounds = "feedback_sounds"
+            case digits, annotation, timerBar = "timer_bar", tiles, surround, fov
             case conditionNumber = "condition_nr"
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
@@ -549,7 +547,7 @@ private struct CompletedTrial: Encodable {
         }
     }
 
-    struct CountdownBar: Encodable {
+    struct TimerBar: Encodable {
         let fillRGB: [Float]
         let heightDegrees: Float
         let cornerRadiusDegrees: Float
@@ -565,28 +563,6 @@ private struct CompletedTrial: Encodable {
             case backHeightDegrees = "back_height_degrees"
             case backCornerRadiusDegrees = "back_corner_radius_degrees"
         }
-    }
-
-    struct Countdown: Encodable {
-        let bar: CountdownBar
-        let stopwatchVolume: Float
-        let finalGongVolume: Float
-
-        private enum CodingKeys: String, CodingKey {
-            case bar
-            case stopwatchVolume = "stopwatch_volume"
-            case finalGongVolume = "final_gong_volume"
-        }
-    }
-
-    struct FeedbackSound: Encodable {
-        let file: String
-        let volume: Float
-    }
-
-    struct FeedbackSounds: Encodable {
-        let correct: FeedbackSound
-        let wrong: FeedbackSound
     }
 
     struct Tiles: Encodable {
@@ -752,7 +728,7 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["experiment", "trials", "summary"]
         } else if dictionary.keys.contains("application") {
             preferredOrder = [
-                "application", "protocol_name", "subject_number", "task_mode", "input", "forced_voice_input",
+                "application", "protocol_name", "subject_number", "task_mode", "input", "sounds", "forced_voice_input",
                 "start_date", "start_time"
             ]
         } else if dictionary.keys.contains("duration_seconds") {
@@ -761,17 +737,16 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_nr") {
             preferredOrder = [
-                "condition_nr", "block_nr", "random_seed", "passthrough_dimming", "digits", "annotation", "countdown", "feedback_sounds",
-                "tiles", "surround", "fov"
+                "condition_nr", "block_nr", "random_seed", "passthrough_dimming", "digits", "annotation", "timer_bar", "tiles", "surround", "fov"
             ]
-        } else if dictionary.keys.contains("stopwatch_volume") {
-            preferredOrder = ["bar", "stopwatch_volume", "final_gong_volume"]
+        } else if dictionary.keys.contains("correct") && dictionary.keys.contains("timer") {
+            preferredOrder = ["correct", "wrong", "timer", "final"]
         } else if dictionary.keys.contains("start_digits") {
             preferredOrder = ["start_digits", "stop_command", "cross_digits", "speech"]
         } else if dictionary.keys.contains("target_number") {
             preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
-        } else if dictionary.keys.contains("absolute_start_time_ms") {
-            preferredOrder = ["absolute_start_time_ms", "digit_reveal_ms", "stop_signal_start_ms", "answer_correct", "speech", "keyboard"]
+        } else if dictionary.keys.contains("absolute_trial_start_ms") {
+            preferredOrder = ["absolute_trial_start_ms", "digit_reveal_ms", "timer_start_ms", "stop_signal_start_ms", "timer_stop_ms", "answer_correct", "speech", "keyboard"]
         } else if dictionary.keys.contains("start_ms") {
             preferredOrder = ["start_ms", "stop_ms"]
         } else if dictionary.keys.contains("back_height_degrees") {

@@ -49,7 +49,7 @@ final class AppModel {
     private var timedSessionTask: Task<Void, Never>?
     private var timedSessionElapsedNanoseconds: UInt64 = 0
     private var timedSessionSearchStartNanoseconds: UInt64?
-    private var timedSessionFinalGongVolume: Float = 0
+    private var timedSessionFinalSound: SoundEffectConfiguration?
     private var instantiatedExperiment: Experiment?
     private var preparedTrialRevision: Int?
     private var currentTrialMeasurement: InProgressTrialMeasurement?
@@ -361,7 +361,7 @@ final class AppModel {
     func markCurrentTrialStarted() {
         postStopMaskTask?.cancel()
         postStopMaskTask = nil
-        currentTrialMeasurement = .init(startTimeMS: elapsedMilliseconds())
+        currentTrialMeasurement = .init(absoluteTrialStartMS: elapsedMilliseconds())
         DiagnosticLog.event("trial", "measurement started; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase))")
     }
 
@@ -403,8 +403,8 @@ final class AppModel {
             case .search:
                 statusMessage = "Listening… find the target, then read the three crossing digits."
             }
-            if let stimulus = instantiatedExperiment?.configuration.stimulus {
-                await feedbackSoundPlayer.prepare(configuration: stimulus)
+            if let plan {
+                await feedbackSoundPlayer.prepare(configuration: plan.sounds)
             }
         } catch {
             if error is CancellationError {
@@ -465,10 +465,7 @@ final class AppModel {
            let stopSegment = segments.first(where: {
                $0.text.lowercased().split(whereSeparator: { !$0.isLetter }).contains("stop")
            }) {
-            stopSearchTimer(
-                atMS: elapsedMilliseconds(atUptimeNanoseconds: stopSegment.startUptimeNanoseconds),
-                atUptimeNanoseconds: stopSegment.startUptimeNanoseconds
-            )
+            stopSearchTimer(atMS: elapsedMilliseconds(atUptimeNanoseconds: stopSegment.startUptimeNanoseconds))
             speechListener.pauseForFeedback()
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
             return
@@ -497,11 +494,12 @@ final class AppModel {
                 trialPhase = .search
                 let targetReadMS = elapsedMilliseconds()
                 currentTrialMeasurement?.digitRevealMS = targetReadMS
+                currentTrialMeasurement?.timerStartMS = targetReadMS
                 resultFileWriter.markFirstTargetRead(atMS: targetReadMS)
                 startTimedSessionIfNeeded()
                 DiagnosticLog.event("trial", "target cue confirmed; trial=\(currentTrialIndex + 1); search phase entered")
                 stimulusPresentationState.revealGrid()
-                feedbackSoundPlayer.playPop()
+                feedbackSoundPlayer.playReveal()
                 statusMessage = "Target confirmed. Find it, then read the three crossing digits."
                 scheduleSpeechRestart(afterNanoseconds: 250_000_000)
             } else {
@@ -515,7 +513,9 @@ final class AppModel {
         let answerCorrect = candidate == experiment.grid.verificationCode
         guard let measurement = currentTrialMeasurement,
               let digitRevealMS = measurement.digitRevealMS,
-              let stopSignalStartMS = measurement.stopSignalStartMS else {
+              let timerStartMS = measurement.timerStartMS,
+              let stopSignalStartMS = measurement.stopSignalStartMS,
+              let timerStopMS = measurement.timerStopMS else {
             statusMessage = "Use the configured stop command before entering the crossing number."
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
             return
@@ -529,9 +529,11 @@ final class AppModel {
             try resultFileWriter.appendCompletedTrial(
                 experiment,
                 results: .init(
-                    startTimeMS: measurement.startTimeMS,
+                    absoluteTrialStartMS: measurement.absoluteTrialStartMS,
                     digitRevealMS: digitRevealMS,
+                    timerStartMS: timerStartMS,
                     stopSignalStartMS: stopSignalStartMS,
+                    timerStopMS: timerStopMS,
                     answerCorrect: answerCorrect,
                     speech: measurement.speech,
                     keyboard: measurement.keyboard
@@ -602,41 +604,28 @@ final class AppModel {
         handleTrialCandidate(candidate, spoken: false)
     }
 
-    private func stopSearchTimer(
-        atMS milliseconds: UInt64,
-        atUptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
-    ) {
+    private func stopSearchTimer(atMS milliseconds: UInt64) {
         guard trialPhase == .search,
               currentTrialMeasurement?.stopSignalStartMS == nil else { return }
         currentTrialMeasurement?.stopSignalStartMS = milliseconds
         pauseTimedSession()
+        currentTrialMeasurement?.timerStopMS = elapsedMilliseconds()
+        feedbackSoundPlayer.playStopTimer()
         schedulePostStopMask(
-            atUptimeNanoseconds: atUptimeNanoseconds,
             afterSeconds: instantiatedExperiment?.configuration.stimulus.postStopVisibilitySeconds ?? 0
         )
         statusMessage = "Timer stopped. Enter the three crossing digits."
     }
 
-    private func schedulePostStopMask(
-        atUptimeNanoseconds stopUptimeNanoseconds: UInt64,
-        afterSeconds visibilitySeconds: Float
-    ) {
+    private func schedulePostStopMask(afterSeconds visibilitySeconds: Float) {
         postStopMaskTask?.cancel()
         let visibilityNanoseconds = UInt64(Double(visibilitySeconds) * 1_000_000_000)
-        let now = DispatchTime.now().uptimeNanoseconds
-        let deadline = stopUptimeNanoseconds.addingReportingOverflow(visibilityNanoseconds)
-        let remainingNanoseconds: UInt64
-        if deadline.overflow || deadline.partialValue <= now {
-            remainingNanoseconds = 0
-        } else {
-            remainingNanoseconds = deadline.partialValue - now
-        }
-        guard remainingNanoseconds > 0 else {
+        guard visibilityNanoseconds > 0 else {
             stimulusPresentationState.maskGrid()
             return
         }
         postStopMaskTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: remainingNanoseconds)
+            try? await Task.sleep(nanoseconds: visibilityNanoseconds)
             guard !Task.isCancelled,
                   let self,
                   self.trialPhase == .search,
@@ -934,6 +923,7 @@ final class AppModel {
             subjectNumber: subjectNumber,
             taskMode: plan.taskMode,
             input: plan.input,
+            sounds: plan.sounds,
             forcedVoiceInput: forcedVoiceInput
         )
         hasExperimentBegun = true
@@ -1028,10 +1018,8 @@ final class AppModel {
             durationSeconds: seconds,
             elapsedNanoseconds: timedSessionElapsedNanoseconds
         )
-        if let stimulus = instantiatedExperiment?.configuration.stimulus {
-            timedSessionFinalGongVolume = stimulus.finalGongVolume
-            countdownAudioPlayer.start(volume: stimulus.stopwatchVolume)
-        }
+        timedSessionFinalSound = plan.sounds.final
+        countdownAudioPlayer.start(sound: plan.sounds.timer)
         timedSessionTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: remainingNanoseconds)
             guard !Task.isCancelled else { return }
@@ -1083,10 +1071,10 @@ final class AppModel {
             print("SmartFOV123 result error: \(error.localizedDescription)")
         }
         synchronizeParticipantPresentation()
-        if timedSessionFinalGongVolume > 0 {
-            countdownAudioPlayer.playGong(volume: timedSessionFinalGongVolume)
+        if let timedSessionFinalSound, timedSessionFinalSound.volume > 0 {
+            countdownAudioPlayer.playGong(sound: timedSessionFinalSound)
         }
-        timedSessionFinalGongVolume = 0
+        timedSessionFinalSound = nil
     }
 
     /// The Digital Crown returns the windowless experience to Home View,
@@ -1125,9 +1113,11 @@ final class AppModel {
 }
 
 private struct InProgressTrialMeasurement {
-    let startTimeMS: UInt64
+    let absoluteTrialStartMS: UInt64
     var digitRevealMS: UInt64?
+    var timerStartMS: UInt64?
     var stopSignalStartMS: UInt64?
+    var timerStopMS: UInt64?
     var speech: [CompletedTrialResults.SpeechDetection] = []
     var keyboard: [CompletedTrialResults.KeyboardDetection] = []
 }

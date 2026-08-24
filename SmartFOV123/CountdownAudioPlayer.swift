@@ -5,11 +5,11 @@ final class CountdownAudioPlayer {
     private var stopwatchPlayer: AVAudioPlayer?
     private var gongPlayer: AVAudioPlayer?
 
-    func start(volume: Float) {
-        stopwatchPlayer = stopwatchPlayer ?? Self.loadPlayer(named: "stopwatch")
+    func start(sound: SoundEffectConfiguration) {
+        stopwatchPlayer = Self.loadPlayer(file: sound.file)
         guard let stopwatchPlayer else { return }
         stopwatchPlayer.numberOfLoops = -1
-        stopwatchPlayer.volume = Self.playbackVolume(for: volume)
+        stopwatchPlayer.volume = Self.playbackVolume(for: sound.volume)
         if !stopwatchPlayer.play() {
             print("SmartFOV123 audio error: stopwatch playback couldn't start.")
         }
@@ -19,9 +19,9 @@ final class CountdownAudioPlayer {
         stopwatchPlayer?.pause()
     }
 
-    func playGong(volume: Float) {
-        gongPlayer = gongPlayer ?? Self.loadPlayer(named: "gong")
-        gongPlayer?.volume = Self.playbackVolume(for: volume)
+    func playGong(sound: SoundEffectConfiguration) {
+        gongPlayer = Self.loadPlayer(file: sound.file)
+        gongPlayer?.volume = Self.playbackVolume(for: sound.volume)
         gongPlayer?.currentTime = 0
         if gongPlayer?.play() != true {
             print("SmartFOV123 audio error: gong playback couldn't start.")
@@ -34,11 +34,14 @@ final class CountdownAudioPlayer {
         gongPlayer?.stop()
     }
 
-    private static func loadPlayer(named name: String) -> AVAudioPlayer? {
-        let url = Bundle.main.url(forResource: name, withExtension: "caf")
-            ?? Bundle.main.url(forResource: name, withExtension: "caf", subdirectory: "Audio")
+    private static func loadPlayer(file: String) -> AVAudioPlayer? {
+        let fileName = file as NSString
+        let name = fileName.deletingPathExtension
+        let fileExtension = fileName.pathExtension.isEmpty ? "caf" : fileName.pathExtension
+        let url = Bundle.main.url(forResource: name, withExtension: fileExtension)
+            ?? Bundle.main.url(forResource: name, withExtension: fileExtension, subdirectory: "Audio")
         guard let url else {
-            print("SmartFOV123 audio error: \(name).caf is missing from the app bundle.")
+            print("SmartFOV123 audio error: \(file) is missing from the app bundle.")
             return nil
         }
         do {
@@ -50,7 +53,7 @@ final class CountdownAudioPlayer {
             return player
         } catch {
             print(
-                "SmartFOV123 audio error: couldn't load \(name).caf "
+                "SmartFOV123 audio error: couldn't load \(file) "
                     + "(\(error.localizedDescription))."
             )
             return nil

@@ -5,44 +5,57 @@ final class FeedbackSoundPlayer {
     private enum Sound: Sendable {
         case correct
         case wrong
-        case pop
+        case reveal
+        case stopTimer
     }
 
     private final class AudioState: @unchecked Sendable {
         var correctPlayer: AVAudioPlayer?
         var wrongPlayer: AVAudioPlayer?
-        var popPlayer: AVAudioPlayer?
+        var revealPlayer: AVAudioPlayer?
+        var stopTimerPlayer: AVAudioPlayer?
         var configurationKey: String?
     }
 
     private let audioQueue = DispatchQueue(label: "SmartFOV123.FeedbackAudio")
     private let audioState = AudioState()
 
-    func prepare(configuration: StimulusConfiguration) async {
+    func prepare(configuration: SoundsConfiguration) async {
         let audioState = audioState
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             audioQueue.async {
                 defer { continuation.resume() }
                 let configurationKey = [
-                    configuration.correctFeedbackFile,
-                    String(configuration.correctFeedbackVolume),
-                    configuration.wrongFeedbackFile,
-                    String(configuration.wrongFeedbackVolume)
+                    configuration.reveal.file,
+                    String(configuration.reveal.volume),
+                    configuration.stopTimer.file,
+                    String(configuration.stopTimer.volume),
+                    configuration.correct.file,
+                    String(configuration.correct.volume),
+                    configuration.wrong.file,
+                    String(configuration.wrong.volume)
                 ].joined(separator: "|")
                 guard audioState.configurationKey != configurationKey else { return }
 
                 // The session-level setting is a fallback for visionOS versions before
                 // per-player spatial experiences became available.
                 Self.configureHeadLockedAudio()
-                audioState.correctPlayer = Self.loadPlayer(file: configuration.correctFeedbackFile)
+                audioState.correctPlayer = Self.loadPlayer(file: configuration.correct.file)
                 audioState.correctPlayer?.volume = Self.playbackVolume(
-                    for: configuration.correctFeedbackVolume
+                    for: configuration.correct.volume
                 )
-                audioState.wrongPlayer = Self.loadPlayer(file: configuration.wrongFeedbackFile)
+                audioState.wrongPlayer = Self.loadPlayer(file: configuration.wrong.file)
                 audioState.wrongPlayer?.volume = Self.playbackVolume(
-                    for: configuration.wrongFeedbackVolume
+                    for: configuration.wrong.volume
                 )
-                audioState.popPlayer = audioState.popPlayer ?? Self.loadPlayer(file: "pop.caf")
+                audioState.revealPlayer = Self.loadPlayer(file: configuration.reveal.file)
+                audioState.revealPlayer?.volume = Self.playbackVolume(
+                    for: configuration.reveal.volume
+                )
+                audioState.stopTimerPlayer = Self.loadPlayer(file: configuration.stopTimer.file)
+                audioState.stopTimerPlayer?.volume = Self.playbackVolume(
+                    for: configuration.stopTimer.volume
+                )
                 audioState.configurationKey = configurationKey
             }
         }
@@ -56,8 +69,12 @@ final class FeedbackSoundPlayer {
         play(.wrong)
     }
 
-    func playPop() {
-        play(.pop)
+    func playReveal() {
+        play(.reveal)
+    }
+
+    func playStopTimer() {
+        play(.stopTimer)
     }
 
     private func play(_ sound: Sound) {
@@ -66,7 +83,8 @@ final class FeedbackSoundPlayer {
             let player = switch sound {
             case .correct: audioState.correctPlayer
             case .wrong: audioState.wrongPlayer
-            case .pop: audioState.popPlayer
+            case .reveal: audioState.revealPlayer
+            case .stopTimer: audioState.stopTimerPlayer
             }
             guard let player else { return }
             player.currentTime = 0
