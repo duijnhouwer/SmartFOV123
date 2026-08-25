@@ -354,9 +354,6 @@ struct ExperimentPlan: Sendable {
     let taskMode: TaskMode
     let sounds: SoundsConfiguration
     let input: InputConfiguration
-    /// Compositor-layer configuration is fixed for the duration of a session,
-    /// so this option applies consistently to every trial in the plan.
-    let foveatedRendering: Bool
     let trials: [ScheduledTrial]
 
     func replacingInput(with input: InputConfiguration) -> ExperimentPlan {
@@ -369,7 +366,6 @@ struct ExperimentPlan: Sendable {
             taskMode: taskMode,
             sounds: sounds,
             input: input,
-            foveatedRendering: foveatedRendering,
             trials: trials
         )
     }
@@ -390,9 +386,10 @@ struct ExperimentPlan: Sendable {
             throw ExperimentError.invalidConfiguration(error.localizedDescription)
         }
 
+        let expandedData = try ConditionFactorExpander.expandConditions(in: data)
         let file: ExperimentFile
         do {
-            file = try JSONDecoder().decode(ExperimentFile.self, from: data)
+            file = try JSONDecoder().decode(ExperimentFile.self, from: expandedData)
         } catch let error as DecodingError {
             throw ExperimentError.invalidConfiguration(describe(error))
         } catch {
@@ -426,6 +423,91 @@ struct ExperimentPlan: Sendable {
     }
 }
 
+private struct AppConfiguration: Sendable {
+    private struct File: Decodable {
+        let appSettings: AppSettings
+
+        private enum CodingKeys: String, CodingKey {
+            case appSettings = "app_settings"
+        }
+    }
+
+    private struct AppSettings: Decodable {
+        let foveatedRendering: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case foveatedRendering = "foveated_rendering"
+        }
+    }
+
+    let foveatedRendering: Bool
+
+    static func load(from documentsURL: URL, using fileManager: FileManager) throws -> AppConfiguration {
+        let destinationURL = documentsURL.appendingPathComponent("config.json", isDirectory: false)
+        if !fileManager.fileExists(atPath: destinationURL.path) {
+            guard let sourceURL = Bundle.main.url(forResource: "config", withExtension: "json") else {
+                throw ExperimentError.missingAppConfiguration
+            }
+            do {
+                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            } catch {
+                throw ExperimentError.couldNotInstallAppConfiguration(error)
+            }
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: destinationURL)
+        } catch {
+            throw ExperimentError.unreadableAppConfiguration(error)
+        }
+
+        let rawObject: Any
+        do {
+            rawObject = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw ExperimentError.invalidAppConfiguration(
+                "config.json contains malformed JSON: \(error.localizedDescription)"
+            )
+        }
+        guard let root = rawObject as? [String: Any] else {
+            throw ExperimentError.invalidAppConfiguration("config.json root must be an object.")
+        }
+        try validateKeys(root, allowed: ["app_settings"], path: "config.json")
+        guard let rawSettings = root["app_settings"] as? [String: Any] else {
+            throw ExperimentError.invalidAppConfiguration("config.json.app_settings must be an object.")
+        }
+        try validateKeys(
+            rawSettings,
+            allowed: ["foveated_rendering"],
+            path: "config.json.app_settings"
+        )
+
+        let file: File
+        do {
+            file = try JSONDecoder().decode(File.self, from: data)
+        } catch {
+            throw ExperimentError.invalidAppConfiguration(
+                "config.json could not be decoded: \(error.localizedDescription)"
+            )
+        }
+        return .init(foveatedRendering: file.appSettings.foveatedRendering)
+    }
+
+    private static func validateKeys(
+        _ object: [String: Any],
+        allowed: Set<String>,
+        path: String
+    ) throws {
+        let unknown = Set(object.keys).subtracting(allowed).sorted()
+        guard unknown.isEmpty else {
+            throw ExperimentError.invalidAppConfiguration(
+                "\(path) contains unknown key(s): \(unknown.joined(separator: ", "))."
+            )
+        }
+    }
+}
+
 struct ProtocolCatalog: Sendable {
     struct InvalidProtocol: Sendable {
         let filename: String
@@ -451,6 +533,11 @@ struct ProtocolCatalog: Sendable {
         } catch {
             throw ExperimentError.protocolDirectoryUnavailable(error)
         }
+
+        let appConfiguration = try AppConfiguration.load(
+            from: documentsURL,
+            using: fileManager
+        )
 
         let protocolsURL = documentsURL.appendingPathComponent(
             "protocols",
@@ -528,23 +615,10 @@ struct ProtocolCatalog: Sendable {
                 "No visible JSON protocol files were found in the Documents/protocols folder."
             )
         }
-        let foveationValues = Set(validPlans.map(\.foveatedRendering))
-        if validPlans.isEmpty {
-            return .init(
-                plans: [],
-                invalidProtocols: invalidProtocols,
-                foveatedRendering: true
-            )
-        }
-        guard foveationValues.count == 1, let foveatedRendering = foveationValues.first else {
-            throw ExperimentError.invalidConfiguration(
-                "All valid protocols must use the same foveated_rendering value because compositor configuration is fixed before spoken protocol selection."
-            )
-        }
         return .init(
             plans: validPlans,
             invalidProtocols: invalidProtocols,
-            foveatedRendering: foveatedRendering
+            foveatedRendering: appConfiguration.foveatedRendering
         )
     }
 
@@ -603,21 +677,33 @@ struct ProtocolCatalog: Sendable {
 
 enum ExperimentError: LocalizedError {
     case missingConfiguration
+    case missingAppConfiguration
     case protocolDirectoryUnavailable(Error)
     case couldNotRestoreFallback(Error)
+    case couldNotInstallAppConfiguration(Error)
     case unreadableConfiguration(Error)
+    case unreadableAppConfiguration(Error)
+    case invalidAppConfiguration(String)
     case invalidConfiguration(String)
 
     var errorDescription: String? {
         switch self {
         case .missingConfiguration:
             return "The bundled fallback protocol is unavailable."
+        case .missingAppConfiguration:
+            return "The bundled config.json file is unavailable."
         case .protocolDirectoryUnavailable(let error):
             return "The Documents/protocols directory is unavailable: \(error.localizedDescription)"
         case .couldNotRestoreFallback(let error):
             return "The bundled fallback protocol couldn't be restored to Documents/protocols: \(error.localizedDescription)"
+        case .couldNotInstallAppConfiguration(let error):
+            return "config.json couldn't be installed in Documents: \(error.localizedDescription)"
         case .unreadableConfiguration(let error):
             return "The protocol file couldn't be read: \(error.localizedDescription)"
+        case .unreadableAppConfiguration(let error):
+            return "Documents/config.json couldn't be read: \(error.localizedDescription)"
+        case .invalidAppConfiguration(let message):
+            return "The app configuration is invalid: \(message)"
         case .invalidConfiguration(let message):
             return "The protocol configuration is invalid: \(message)"
         }
@@ -633,7 +719,6 @@ private struct ExperimentFile: Decodable {
     let taskMode: TaskMode
     let sounds: SoundsConfiguration
     let input: InputConfiguration
-    let foveatedRendering: Bool?
     let masterConditionTemplate: ConditionDefinition
     let conditions: [ConditionDefinition]
 
@@ -646,7 +731,6 @@ private struct ExperimentFile: Decodable {
         case taskMode = "task_mode"
         case sounds
         case input
-        case foveatedRendering = "foveated_rendering"
         case masterConditionTemplate = "master_condition_template"
         case conditions
     }
@@ -655,7 +739,6 @@ private struct ExperimentFile: Decodable {
 private enum RandomSeedSpecification: Equatable {
     case shuffle
     case fixed(UInt64)
-    case list([UInt64])
 }
 
 private enum HighlightSpecification: Decodable {
@@ -703,14 +786,12 @@ extension RandomSeedSpecification: Decodable {
         let container = try decoder.singleValueContainer()
         if let value = try? container.decode(UInt64.self) {
             self = .fixed(value)
-        } else if let values = try? container.decode([UInt64].self) {
-            self = .list(values)
         } else {
             let keyword = try container.decode(String.self)
             guard keyword == "shuffle" else {
                 throw DecodingError.dataCorruptedError(
                     in: container,
-                    debugDescription: "Expected an unsigned integer, an integer array, or the string ‘shuffle’."
+                    debugDescription: "Expected an unsigned integer or the string ‘shuffle’."
                 )
             }
             self = .shuffle
@@ -855,9 +936,18 @@ private struct FOVPatch: Decodable {
     }
 }
 
-private struct ConditionDefinition: Decodable {
-    let blockNumber: Int?
+private struct SchedulingDefinition: Decodable {
     let repeats: Int?
+    let blockNumber: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case repeats
+        case blockNumber = "block_nr"
+    }
+}
+
+private struct ConditionDefinition: Decodable {
+    let scheduling: SchedulingDefinition?
     let randomSeed: RandomSeedSpecification?
     let passthroughDimming: Double?
     let digits: DigitPatch?
@@ -868,18 +958,15 @@ private struct ConditionDefinition: Decodable {
     let fov: FOVPatch?
 
     private enum CodingKeys: String, CodingKey {
-        case repeats
+        case scheduling
         case randomSeed = "random_seed"
         case passthroughDimming = "passthrough_dimming"
-        case blockNumber = "block_nr"
         case digits, annotation, timerBar = "timer_bar", tiles, surround, fov
     }
 
 }
 
 private struct ResolvedConditionPatch {
-    var blockNumber: Int?
-    var repeats: Int?
     var randomSeed: RandomSeedSpecification?
     var passthroughDimming: Double?
     var digits = ResolvedDigits()
@@ -890,8 +977,6 @@ private struct ResolvedConditionPatch {
     var fov = ResolvedFOV()
 
     mutating func apply(_ definition: ConditionDefinition) {
-        blockNumber = definition.blockNumber ?? blockNumber
-        repeats = definition.repeats ?? repeats
         randomSeed = definition.randomSeed ?? randomSeed
         passthroughDimming = definition.passthroughDimming ?? passthroughDimming
 
@@ -1035,9 +1120,9 @@ private enum ConditionResolver {
     static let maximumTrialCount = 10_000
 
     static func makePlan(from file: ExperimentFile, protocolName: String) throws -> ExperimentPlan {
-        guard file.schemaVersion == 9 else {
+        guard file.schemaVersion == 10 else {
             throw ExperimentError.invalidConfiguration(
-                "schema_version \(file.schemaVersion) is unsupported; this app requires version 9."
+                "schema_version \(file.schemaVersion) is unsupported; this app requires version 10."
             )
         }
         guard !file.conditions.isEmpty else {
@@ -1073,14 +1158,9 @@ private enum ConditionResolver {
 
         try validateSpeech(file.input.speech)
 
-        guard file.masterConditionTemplate.blockNumber == nil else {
+        guard file.masterConditionTemplate.scheduling == nil else {
             throw ExperimentError.invalidConfiguration(
-                "master_condition_template must not define block_nr."
-            )
-        }
-        guard file.masterConditionTemplate.repeats == nil else {
-            throw ExperimentError.invalidConfiguration(
-                "master_condition_template must not define repeats."
+                "master_condition_template must not define scheduling."
             )
         }
         var master = ResolvedConditionPatch()
@@ -1097,14 +1177,17 @@ private enum ConditionResolver {
         for (index, definition) in file.conditions.enumerated() {
             let conditionNumber = index + 1
             let definitionName = "condition \(conditionNumber)"
-            guard let repeats = definition.repeats else {
-                throw invalid(definitionName, "must explicitly define repeats.")
+            guard let scheduling = definition.scheduling else {
+                throw invalid(definitionName, "must explicitly define scheduling.")
             }
-            guard let blockNumber = definition.blockNumber else {
-                throw invalid(definitionName, "must explicitly define block_nr.")
+            guard let repeats = scheduling.repeats else {
+                throw invalid(definitionName, "scheduling must explicitly define repeats.")
             }
-            guard repeats > 0 else {
-                throw invalid(definitionName, "repeats must be greater than zero.")
+            guard let blockNumber = scheduling.blockNumber else {
+                throw invalid(definitionName, "scheduling must explicitly define block_nr.")
+            }
+            guard repeats >= 0 else {
+                throw invalid(definitionName, "repeats must be zero or greater.")
             }
             guard repeats <= maximumTrialCount else {
                 throw invalid(definitionName, "repeats may not exceed \(maximumTrialCount).")
@@ -1119,11 +1202,7 @@ private enum ConditionResolver {
                 throw invalid(definitionName, "does not resolve random_seed; define it in master_condition_template or this condition.")
             }
 
-            let seeds = try expandSeeds(
-                seedSpecification,
-                repeats: repeats,
-                definitionName: definitionName
-            )
+            let seeds = expandSeeds(seedSpecification, repeats: repeats)
             for seed in seeds {
                 guard expanded.count < maximumTrialCount else {
                     throw ExperimentError.invalidConfiguration(
@@ -1193,7 +1272,6 @@ private enum ConditionResolver {
             taskMode: file.taskMode,
             sounds: file.sounds,
             input: file.input,
-            foveatedRendering: file.foveatedRendering ?? true,
             trials: trials
         )
     }
@@ -1464,23 +1542,14 @@ private enum ConditionResolver {
 
     private static func expandSeeds(
         _ specification: RandomSeedSpecification,
-        repeats: Int,
-        definitionName: String
-    ) throws -> [UInt64] {
+        repeats: Int
+    ) -> [UInt64] {
         switch specification {
         case .shuffle:
             var generator = SystemRandomNumberGenerator()
             return (0..<repeats).map { _ in UInt64.random(in: .min ... .max, using: &generator) }
         case .fixed(let seed):
             return [UInt64](repeating: seed, count: repeats)
-        case .list(let seeds):
-            guard seeds.count == repeats else {
-                throw invalid(
-                    definitionName,
-                    "random_seed contains \(seeds.count) values but repeats is \(repeats)."
-                )
-            }
-            return seeds
         }
     }
 
@@ -1508,9 +1577,8 @@ private enum ConditionResolver {
     private static func randomizedWithinBlocks(
         _ conditions: [ExpandedCondition]
     ) -> [ExpandedCondition] {
-        let maximumBlock = conditions.map(\.blockNumber).max()!
         var generator = SystemRandomNumberGenerator()
-        return (1...maximumBlock).flatMap { block in
+        return Set(conditions.map(\.blockNumber)).sorted().flatMap { block in
             conditions
                 .filter { $0.blockNumber == block }
                 .shuffled(using: &generator)
@@ -1596,6 +1664,263 @@ private enum ConditionResolver {
     }
 }
 
+private enum ConditionFactorExpander {
+    private struct ParallelArray {
+        let path: String
+        let count: Int
+    }
+
+    private static let rgbKeys: Set<String> = [
+        "rgb", "font_rgb", "fill_rgb", "back_rgb", "gutter_rgb", "inner_margin_rgb",
+        "highlight_correct_rgb", "highlight_wrong_rgb"
+    ]
+
+    static func expandConditions(in data: Data) throws -> Data {
+        let rawRoot: Any
+        do {
+            rawRoot = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw ExperimentError.invalidConfiguration("Malformed JSON: \(error.localizedDescription)")
+        }
+        guard var root = rawRoot as? [String: Any],
+              let rawConditions = root["conditions"] as? [Any] else {
+            return data
+        }
+
+        if let master = root["master_condition_template"] {
+            var masterArrays: [ParallelArray] = []
+            try collectParallelArrays(
+                in: master,
+                key: nil,
+                path: "$.master_condition_template",
+                into: &masterArrays
+            )
+            if let first = masterArrays.first {
+                throw ExperimentError.invalidConfiguration(
+                    "\(first.path) uses a factor array; master_condition_template values must be scalar."
+                )
+            }
+        }
+
+        var expandedConditions: [Any] = []
+        for (conditionIndex, rawCondition) in rawConditions.enumerated() {
+            let conditionPath = "$.conditions[\(conditionIndex)]"
+            guard var baseCondition = rawCondition as? [String: Any] else {
+                throw ExperimentError.invalidConfiguration("\(conditionPath) must be an object.")
+            }
+            let rawFactors = baseCondition.removeValue(forKey: "factors")
+            let factors: [Any]
+            if let rawFactors {
+                guard let values = rawFactors as? [Any], !values.isEmpty else {
+                    throw ExperimentError.invalidConfiguration(
+                        "\(conditionPath).factors must be a nonempty array."
+                    )
+                }
+                factors = values
+            } else {
+                factors = []
+            }
+
+            var baseArrays: [ParallelArray] = []
+            try collectParallelArrays(
+                in: baseCondition,
+                key: nil,
+                path: conditionPath,
+                into: &baseArrays
+            )
+            if let misplaced = baseArrays.first(where: { !isSchedulingPath($0.path) }) {
+                throw ExperimentError.invalidConfiguration(
+                    "\(misplaced.path) is a factor array; condition factor arrays must be inside factors."
+                )
+            }
+            try validateMatchingLengths(
+                baseArrays,
+                groupName: "scheduling",
+                conditionPath: conditionPath
+            )
+            let schedulingCount = baseArrays.map(\.count).max() ?? 1
+
+            var factorCombinations: [[String: Any]] = [[:]]
+            for (factorIndex, rawFactor) in factors.enumerated() {
+                let factorPath = "\(conditionPath).factors[\(factorIndex)]"
+                guard let factor = rawFactor as? [String: Any] else {
+                    throw ExperimentError.invalidConfiguration("\(factorPath) must be an object.")
+                }
+                let levels = try expandFactor(factor, path: factorPath)
+                var crossed: [[String: Any]] = []
+                for combination in factorCombinations {
+                    for level in levels {
+                        var merged = combination
+                        try merge(
+                            level,
+                            into: &merged,
+                            rejectingConflicts: true,
+                            path: conditionPath
+                        )
+                        crossed.append(merged)
+                    }
+                }
+                factorCombinations = crossed
+            }
+
+            for schedulingIndex in 0..<schedulingCount {
+                guard let scheduledCondition = selectParallelValue(
+                    from: baseCondition,
+                    key: nil,
+                    index: schedulingIndex
+                ) as? [String: Any] else {
+                    throw ExperimentError.invalidConfiguration("\(conditionPath) must be an object.")
+                }
+                for combination in factorCombinations {
+                    var expandedCondition = scheduledCondition
+                    try merge(
+                        combination,
+                        into: &expandedCondition,
+                        rejectingConflicts: false,
+                        path: conditionPath
+                    )
+                    expandedConditions.append(expandedCondition)
+                }
+            }
+        }
+        root["conditions"] = expandedConditions
+        do {
+            return try JSONSerialization.data(withJSONObject: root)
+        } catch {
+            throw ExperimentError.invalidConfiguration(
+                "The expanded protocol could not be serialized: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private static func expandFactor(
+        _ factor: [String: Any],
+        path: String
+    ) throws -> [[String: Any]] {
+        var arrays: [ParallelArray] = []
+        try collectParallelArrays(in: factor, key: nil, path: path, into: &arrays)
+        try validateMatchingLengths(arrays, groupName: "factor", conditionPath: path)
+        let levelCount = arrays.map(\.count).max() ?? 1
+        return try (0..<levelCount).map { levelIndex in
+            guard let level = selectParallelValue(
+                from: factor,
+                key: nil,
+                index: levelIndex
+            ) as? [String: Any] else {
+                throw ExperimentError.invalidConfiguration("\(path) must be an object.")
+            }
+            return level
+        }
+    }
+
+    private static func collectParallelArrays(
+        in value: Any,
+        key: String?,
+        path: String,
+        into arrays: inout [ParallelArray]
+    ) throws {
+        if let dictionary = value as? [String: Any] {
+            for (childKey, childValue) in dictionary {
+                try collectParallelArrays(
+                    in: childValue,
+                    key: childKey,
+                    path: "\(path).\(childKey)",
+                    into: &arrays
+                )
+            }
+            return
+        }
+        guard let array = value as? [Any], !isAtomic(array, key: key) else { return }
+        guard !array.isEmpty else {
+            throw ExperimentError.invalidConfiguration(
+                "\(path) is an empty factor or scheduling array; provide at least one value."
+            )
+        }
+        arrays.append(
+            .init(
+                path: path,
+                count: array.count
+            )
+        )
+    }
+
+    private static func selectParallelValue(
+        from value: Any,
+        key: String?,
+        index: Int
+    ) -> Any {
+        if let dictionary = value as? [String: Any] {
+            var selected: [String: Any] = [:]
+            for (childKey, childValue) in dictionary {
+                selected[childKey] = selectParallelValue(
+                    from: childValue,
+                    key: childKey,
+                    index: index
+                )
+            }
+            return selected
+        }
+        guard let array = value as? [Any], !isAtomic(array, key: key) else { return value }
+        if array.count == 1 {
+            return array[0]
+        }
+        return array[index]
+    }
+
+    private static func validateMatchingLengths(
+        _ arrays: [ParallelArray],
+        groupName: String,
+        conditionPath: String
+    ) throws {
+        let maximum = arrays.map(\.count).max() ?? 1
+        guard arrays.contains(where: { $0.count != 1 && $0.count != maximum }) else { return }
+        let lengths = arrays
+            .map { "\($0.path) has \($0.count)" }
+            .joined(separator: "; ")
+        throw ExperimentError.invalidConfiguration(
+            "\(conditionPath) contains \(groupName) arrays with different lengths; \(lengths)."
+        )
+    }
+
+    private static func isSchedulingPath(_ path: String) -> Bool {
+        path.contains(".scheduling.")
+    }
+
+    private static func merge(
+        _ overlay: [String: Any],
+        into base: inout [String: Any],
+        rejectingConflicts: Bool,
+        path: String
+    ) throws {
+        for (key, overlayValue) in overlay {
+            let childPath = "\(path).\(key)"
+            if var baseDictionary = base[key] as? [String: Any],
+               let overlayDictionary = overlayValue as? [String: Any] {
+                try merge(
+                    overlayDictionary,
+                    into: &baseDictionary,
+                    rejectingConflicts: rejectingConflicts,
+                    path: childPath
+                )
+                base[key] = baseDictionary
+            } else if rejectingConflicts, base[key] != nil {
+                throw ExperimentError.invalidConfiguration(
+                    "\(childPath) is defined by more than one factor; factor properties must not overlap."
+                )
+            } else {
+                base[key] = overlayValue
+            }
+        }
+    }
+
+    private static func isAtomic(_ array: [Any], key: String?) -> Bool {
+        guard let key else { return false }
+        return rgbKeys.contains(key)
+            && array.count == 3
+            && array.allSatisfy { $0 is NSNumber }
+    }
+}
+
 private enum JSONShapeValidator {
     static func validate(_ data: Data) throws {
         let object: Any
@@ -1609,11 +1934,19 @@ private enum JSONShapeValidator {
             root,
             allowed: [
                 "schema_version", "subject_number_digit_count",
-                "instructions", "debriefing_title", "debriefing", "foveated_rendering", "task_mode",
+                "instructions", "debriefing_title", "debriefing", "task_mode",
                 "sounds", "input", "master_condition_template", "conditions"
             ],
             path: "$"
         )
+        guard let schemaVersion = root["schema_version"] as? Int else {
+            throw invalid("$.schema_version", "must be an integer.")
+        }
+        guard schemaVersion == 10 else {
+            throw ExperimentError.invalidConfiguration(
+                "schema_version \(schemaVersion) is unsupported; this app requires version 10."
+            )
+        }
         guard let rawInput = root["input"] else {
             throw invalid("$.input", "is required.")
         }
@@ -1645,29 +1978,61 @@ private enum JSONShapeValidator {
         guard let rawMaster = root["master_condition_template"] else {
             throw invalid("$.master_condition_template", "is required.")
         }
-        try definition(rawMaster, path: "$.master_condition_template", schedulingFields: false)
+        try definition(
+            rawMaster,
+            path: "$.master_condition_template",
+            schedulingFields: false,
+            factorFields: false
+        )
         guard let rawConditions = root["conditions"] as? [Any] else {
             throw invalid("$.conditions", "must be an array.")
         }
         for (index, rawCondition) in rawConditions.enumerated() {
             let path = "$.conditions[\(index)]"
-            try definition(rawCondition, path: path, schedulingFields: true)
+            try definition(
+                rawCondition,
+                path: path,
+                schedulingFields: true,
+                factorFields: true
+            )
         }
     }
 
     private static func definition(
         _ rawDefinition: Any,
         path: String,
-        schedulingFields: Bool
+        schedulingFields: Bool,
+        factorFields: Bool
     ) throws {
             let condition = try dictionary(rawDefinition, path: path)
             var allowed: Set<String> = [
                 "random_seed", "passthrough_dimming", "digits", "annotation", "timer_bar", "tiles", "surround", "fov"
             ]
             if schedulingFields {
-                allowed.formUnion(["block_nr", "repeats"])
+                allowed.insert("scheduling")
+            }
+            if factorFields {
+                allowed.insert("factors")
             }
             try keys(condition, allowed: allowed, path: path)
+            try section(
+                condition["scheduling"],
+                path: "\(path).scheduling",
+                allowed: ["repeats", "block_nr"]
+            )
+            if let rawFactors = condition["factors"] {
+                guard let factors = rawFactors as? [Any], !factors.isEmpty else {
+                    throw invalid("\(path).factors", "must be a nonempty array.")
+                }
+                for (index, factor) in factors.enumerated() {
+                    try definition(
+                        factor,
+                        path: "\(path).factors[\(index)]",
+                        schedulingFields: false,
+                        factorFields: false
+                    )
+                }
+            }
             try section(
                 condition["digits"],
                 path: "\(path).digits",

@@ -20,8 +20,8 @@ struct StimulusCompositorLayer: CompositorContent, CompositorLayerConfiguration 
         capabilities: LayerRenderer.Capabilities,
         configuration: inout LayerRenderer.Configuration
     ) {
-        // Request foveation by default. A protocol can explicitly disable it
-        // with foveated_rendering: false.
+        // Foveation is an app-session setting loaded from Documents/config.json
+        // before the compositor layer is configured.
         let foveationEnabled = appModel.foveatedRendering
             && capabilities.supportsFoveation
         configuration.isFoveationEnabled = foveationEnabled

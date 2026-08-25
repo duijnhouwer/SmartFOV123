@@ -228,7 +228,7 @@ Scripts should consume `devicectl`'s JSON output rather than parsing its human-r
 ## Technical debt and project hygiene
 
 - [ ] Study comfort with foveated rendering enabled and disabled using the
-  `foveated_rendering` experiment setting. The initial nausea report may have
+  `config.json` app setting. The initial nausea report may have
   been coincidental or may reflect the earlier transient left/right origin
   mismatch; repeat the comparison after that fix before drawing conclusions.
 - [ ] Review and either commit or remove the Xcode-generated shared scheme.
