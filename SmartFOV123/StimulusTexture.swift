@@ -201,7 +201,9 @@ struct StimulusTexture {
                     context.setFillColor(tileRGB.cgColor)
                     let tileRect = CGRect(
                         x: tileFieldRect.minX + CGFloat(column) * (tileWidth + gutterWidth),
-                        y: tileFieldRect.minY + CGFloat(row) * (tileHeight + gutterHeight),
+                        y: tileFieldRect.maxY
+                            - CGFloat(row) * (tileHeight + gutterHeight)
+                            - tileHeight,
                         width: tileWidth,
                         height: tileHeight
                     )

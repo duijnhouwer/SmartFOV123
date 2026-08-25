@@ -280,6 +280,7 @@ struct StimulusConfiguration: Sendable {
 
 struct ExperimentConfiguration: Sendable {
     let display: DisplayConfiguration
+    let maxSearchTimeSeconds: Float
     var stimulus: StimulusConfiguration
 }
 
@@ -952,6 +953,7 @@ private struct ConditionDefinition: Decodable {
     let scheduling: SchedulingDefinition?
     let randomSeed: RandomSeedSpecification?
     let passthroughDimming: Double?
+    let maxSearchTimeSeconds: Float?
     let digits: DigitPatch?
     let annotation: AnnotationPatch?
     let timerBar: CountdownBarPatch?
@@ -963,6 +965,7 @@ private struct ConditionDefinition: Decodable {
         case scheduling
         case randomSeed = "random_seed"
         case passthroughDimming = "passthrough_dimming"
+        case maxSearchTimeSeconds = "max_search_time_seconds"
         case digits, annotation, timerBar = "timer_bar", tiles, surround, fov
     }
 
@@ -971,6 +974,7 @@ private struct ConditionDefinition: Decodable {
 private struct ResolvedConditionPatch {
     var randomSeed: RandomSeedSpecification?
     var passthroughDimming: Double?
+    var maxSearchTimeSeconds: Float?
     var digits = ResolvedDigits()
     var annotation = ResolvedAnnotation()
     var timeBar = ResolvedTimeBar()
@@ -981,6 +985,7 @@ private struct ResolvedConditionPatch {
     mutating func apply(_ definition: ConditionDefinition) {
         randomSeed = definition.randomSeed ?? randomSeed
         passthroughDimming = definition.passthroughDimming ?? passthroughDimming
+        maxSearchTimeSeconds = definition.maxSearchTimeSeconds ?? maxSearchTimeSeconds
 
         if let patch = definition.digits {
             digits.heightDegrees = patch.heightDegrees ?? digits.heightDegrees
@@ -1346,6 +1351,15 @@ private enum ConditionResolver {
         guard patch.fov.mode != nil else { try missing("fov.mode") }
         guard let peakOpacity = patch.fov.peakOpacity else { try missing("fov.peak_opacity") }
         guard let passthroughDimming = patch.passthroughDimming else { try missing("passthrough_dimming") }
+        guard let maxSearchTimeSeconds = patch.maxSearchTimeSeconds else {
+            try missing("max_search_time_seconds")
+        }
+        guard maxSearchTimeSeconds.isFinite, maxSearchTimeSeconds > 0 else {
+            throw invalid(
+                definitionName,
+                "max_search_time_seconds must be finite and greater than zero."
+            )
+        }
         guard let fovWidth = patch.fov.widthDegrees else { try missing("fov.width_degrees") }
         guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.height_degrees") }
         guard let fovZoomedWidthSpecification = patch.fov.zoomedWidthDegrees else {
@@ -1597,6 +1611,7 @@ private enum ConditionResolver {
                 peakOpacity: patch.fov.peakOpacity!,
                 passthroughDimming: patch.passthroughDimming!
             ),
+            maxSearchTimeSeconds: patch.maxSearchTimeSeconds!,
             stimulus: .init(
                 eye: patch.fov.eye!,
                 randomSeed: condition.seed,
@@ -2008,7 +2023,8 @@ private enum JSONShapeValidator {
     ) throws {
             let condition = try dictionary(rawDefinition, path: path)
             var allowed: Set<String> = [
-                "random_seed", "passthrough_dimming", "digits", "annotation", "timer_bar", "tiles", "surround", "fov"
+                "random_seed", "passthrough_dimming", "max_search_time_seconds",
+                "digits", "annotation", "timer_bar", "tiles", "surround", "fov"
             ]
             if schedulingFields {
                 allowed.insert("scheduling")

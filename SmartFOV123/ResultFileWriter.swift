@@ -262,13 +262,19 @@ private struct ResultExperiment: Encodable {
     }
 }
 
+enum TrialResponse: String, Encodable {
+    case correct
+    case wrong
+    case timedOut = "timed_out"
+}
+
 struct CompletedTrialResults: Encodable {
     let absoluteTrialStartMS: UInt64
     let digitRevealMS: Int64
     let timerStartMS: Int64
-    let stopSignalStartMS: Int64
+    let stopSignalStartMS: Int64?
     let timerStopMS: Int64
-    let answerCorrect: Bool
+    let response: TrialResponse
     let speech: [SpeechDetection]
     let keyboard: [KeyboardDetection]
 
@@ -276,9 +282,9 @@ struct CompletedTrialResults: Encodable {
         absoluteTrialStartMS: UInt64,
         digitRevealMS: UInt64,
         timerStartMS: UInt64,
-        stopSignalStartMS: UInt64,
+        stopSignalStartMS: UInt64?,
         timerStopMS: UInt64,
-        answerCorrect: Bool,
+        response: TrialResponse,
         speech: [SpeechDetection],
         keyboard: [KeyboardDetection]
     ) {
@@ -286,9 +292,9 @@ struct CompletedTrialResults: Encodable {
         let signedTrialStartMS = Int64(absoluteTrialStartMS)
         self.digitRevealMS = Int64(digitRevealMS) - signedTrialStartMS
         self.timerStartMS = Int64(timerStartMS) - signedTrialStartMS
-        self.stopSignalStartMS = Int64(stopSignalStartMS) - signedTrialStartMS
+        self.stopSignalStartMS = stopSignalStartMS.map { Int64($0) - signedTrialStartMS }
         self.timerStopMS = Int64(timerStopMS) - signedTrialStartMS
-        self.answerCorrect = answerCorrect
+        self.response = response
         self.speech = speech.map {
             .init(
                 id: $0.id,
@@ -354,7 +360,7 @@ struct CompletedTrialResults: Encodable {
         case timerStartMS = "timer_start_ms"
         case stopSignalStartMS = "stop_signal_start_ms"
         case timerStopMS = "timer_stop_ms"
-        case answerCorrect = "answer_correct"
+        case response
     }
 }
 
@@ -432,6 +438,7 @@ private struct CompletedTrial: Encodable {
         let blockNumber: Int
         let randomSeed: UInt64
         let passthroughDimming: Double
+        let maxSearchTimeSeconds: Float
         let digits: Digits
         let annotation: Annotation
         let timerBar: TimerBar
@@ -446,6 +453,7 @@ private struct CompletedTrial: Encodable {
             blockNumber = experiment.blockNumber
             randomSeed = experiment.randomSeed
             passthroughDimming = configuration.display.passthroughDimming
+            maxSearchTimeSeconds = configuration.maxSearchTimeSeconds
             digits = .init(
                 heightDegrees: stimulus.digitHeightArcmin / 60,
                 fontName: stimulus.digitFontName,
@@ -514,6 +522,7 @@ private struct CompletedTrial: Encodable {
             case blockNumber = "block_nr"
             case randomSeed = "random_seed"
             case passthroughDimming = "passthrough_dimming"
+            case maxSearchTimeSeconds = "max_search_time_seconds"
         }
     }
 
@@ -767,7 +776,9 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["name", "definition", "seeded_stimulus", "results"]
         } else if dictionary.keys.contains("condition_nr") {
             preferredOrder = [
-                "condition_nr", "block_nr", "random_seed", "passthrough_dimming", "digits", "annotation", "timer_bar", "tiles", "surround", "fov"
+                "condition_nr", "block_nr", "random_seed", "passthrough_dimming",
+                "max_search_time_seconds", "digits", "annotation", "timer_bar",
+                "tiles", "surround", "fov"
             ]
         } else if dictionary.keys.contains("correct") && dictionary.keys.contains("timer") {
             preferredOrder = ["correct", "wrong", "timer", "final"]
@@ -779,7 +790,7 @@ private enum JSONPrettyPrinter {
                 "number_of_first_two_digit_duplicates", "grid"
             ]
         } else if dictionary.keys.contains("absolute_trial_start_ms") {
-            preferredOrder = ["absolute_trial_start_ms", "digit_reveal_ms", "timer_start_ms", "stop_signal_start_ms", "timer_stop_ms", "answer_correct", "speech", "keyboard"]
+            preferredOrder = ["absolute_trial_start_ms", "digit_reveal_ms", "timer_start_ms", "stop_signal_start_ms", "timer_stop_ms", "response", "speech", "keyboard"]
         } else if dictionary.keys.contains("start_ms") {
             preferredOrder = ["start_ms"]
         } else if dictionary.keys.contains("recognized_ms") {

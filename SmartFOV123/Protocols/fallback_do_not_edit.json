@@ -36,9 +36,10 @@
     "master_condition_template": {
         "random_seed": "shuffle",
         "passthrough_dimming": 0.0,
+        "max_search_time_seconds": 15,
         "digits": {
-            "height_degrees": 0.7,
-            "font_name": "Arial",
+            "height_degrees": 0.5,
+            "font_name": "Arial Bold",
             "rgb": [0, 0, 0],
             "random_method": "flat_distribution",
             "highlight_correct_rgb": "disabled",
@@ -59,19 +60,19 @@
             "distance_meters": 1.5
         },
         "tiles": {
-            "width_degrees": 1.2,
-            "height_degrees": 1.2,
-            "gutter_degrees": 0.2,
-            "corner_radius_degrees": 0.3,
+            "width_degrees": 1.15,
+            "height_degrees": 1.15,
+            "gutter_degrees": 0.15,
+            "corner_radius_degrees": 0.25,
             "fill_rgb": [1, 1, 1],
             "gutter_rgb": [0, 0, 0],
-            "number_horizontal": 7,
-            "number_vertical": 7
+            "number_horizontal": 8,
+            "number_vertical": 8
         },
         "surround": {
             "fill_rgb": [1.0, 1.0, 1.0],
             "inner_margin_rgb": [0, 0, 0],
-            "inner_margin_degrees": 0.3,
+            "inner_margin_degrees": 0.25,
             "inner_corner_radius_degrees": 0.5,
             "outer_corner_radius_degrees": 0.5
         },
@@ -110,6 +111,9 @@
                         "height_degrees": [14.14, 21.21, 14.14],
                         "zoomed_width_degrees": ["disabled", "disabled", 21.21],
                         "zoomed_height_degrees": ["disabled", "disabled", 21.21]
+                    },
+                    "digits": {
+                        "height_degrees": [0.5, 0.5, 0.333]
                     }
                 }
             ]

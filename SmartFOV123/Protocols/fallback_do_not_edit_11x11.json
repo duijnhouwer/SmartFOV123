@@ -1,0 +1,122 @@
+{
+    "schema_version": 10,
+    "subject_number_digit_count": 3,
+    "instructions": "You will be looking for three-digit numbers hiding in a <GRIDSIZE> grid.\n\nThe target number will be displayed at the top of the grid.\n\nFirst, type the target number and press Enter to reveal the digits. Then search for the target.\n\nPress Space as soon as you find it; this stops the timer. Then type the three-digit number that crosses its middle digit and press Enter.\n\nDelete corrects the most recently typed digit. Keyboard input is not displayed.\n\nThe next target appears automatically after a correct response.\n\nFind as many targets as you can before the <TIMER_SECONDS>-second timer runs out.",
+    "debriefing_title": "Time's up!",
+    "debriefing": "Your score is <NUMBER_OF_TARGETS_FOUND>. Well done!\n\nPress the Digital Crown to exit",
+    "task_mode": "loop_trials_420_seconds",
+    "sounds": {
+        "reveal": { "file": "pop.caf", "volume": 0.5 },
+        "timer": { "file": "stopwatch.caf", "volume": 0.25},
+        "stop_timer": { "file": "tick.caf", "volume": 0.4},
+        "correct": { "file": "correct.caf", "volume": 0.5 },
+        "wrong": { "file": "wrong.caf", "volume": 0.5 },
+        "final": { "file": "gong.caf", "volume": 0.5}
+    },
+    "input": {
+        "start_digits": "speech",
+        "stop_command": "keyboard_space",
+        "cross_digits": "speech",
+        "speech": {
+            "max_interdigit_pause_seconds": 1.0,
+            "aliases": {
+                "0": ["zero", "oh", "o"],
+                "1": ["one", "won"],
+                "2": ["two", "to", "too"],
+                "3": ["three", "free", "tree", "dree"],
+                "4": ["four", "for", "fore"],
+                "5": ["five"],
+                "6": ["six", "sicks"],
+                "7": ["seven"],
+                "8": ["eight", "ate"],
+                "9": ["nine"]
+            }
+        }
+    },
+    "master_condition_template": {
+        "random_seed": "shuffle",
+        "passthrough_dimming": 0.0,
+        "max_search_time_seconds": 12,
+        "digits": {
+            "height_degrees": 0.4,
+            "font_name": "Arial",
+            "rgb": [0, 0, 0],
+            "random_method": "flat_distribution",
+            "highlight_correct_rgb": "disabled",
+            "highlight_wrong_rgb": [1, 0, 0],
+            "post_stop_visibility_seconds": 1.5,
+            "masking_character": "X"
+        },
+        "fov": {
+            "eye": "right",
+            "mode": "optical_see_through_simulation",
+            "peak_opacity": 0.35,
+            "width_degrees": 14.14,
+            "height_degrees": 14.14,
+            "zoomed_width_degrees": "disabled",
+            "zoomed_height_degrees": "disabled",
+            "horizontal_offset_degrees": 0.0,
+            "vertical_offset_degrees": 0.0,
+            "distance_meters": 1.5
+        },
+        "tiles": {
+            "width_degrees": 0.9,
+            "height_degrees": 0.9,
+            "gutter_degrees": 0.1,
+            "corner_radius_degrees": 0.15,
+            "fill_rgb": [1, 1, 1],
+            "gutter_rgb": [0, 0, 0],
+            "number_horizontal": 11,
+            "number_vertical": 11
+        },
+        "surround": {
+            "fill_rgb": [1.0, 1.0, 1.0],
+            "inner_margin_rgb": [0, 0, 0],
+            "inner_margin_degrees": 0.2,
+            "inner_corner_radius_degrees": 0.3,
+            "outer_corner_radius_degrees": 0.3
+        },
+        "annotation": {
+            "height_degrees": 0.6,
+            "font_name": "Arial",
+            "font_rgb": [0, 0, 0]
+        },
+        "timer_bar": {
+            "fill_rgb": [1, 1, 1],
+            "height_degrees": 0.5,
+            "corner_radius_degrees": 0.25,
+            "back_rgb": [0, 0, 0],
+            "back_height_degrees": 0.9,
+            "back_corner_radius_degrees": 0.3
+        }
+    },
+    "conditions": [
+        {
+            "scheduling": {
+                "repeats": 1,
+                "block_nr": 1
+            },
+            "factors": [
+                {
+                    "passthrough_dimming": [0.0, 0.85]
+                },
+                {
+                    "fov": {
+                        "eye": ["left", "right", "both"]
+                    }
+                },
+                {
+                    "fov": {
+                        "width_degrees": [14.14, 21.21, 14.14],
+                        "height_degrees": [14.14, 21.21, 14.14],
+                        "zoomed_width_degrees": ["disabled", "disabled", 21.21],
+                        "zoomed_height_degrees": ["disabled", "disabled", 21.21]
+                    },
+                    "digits": {
+                        "height_degrees": [0.4, 0.4, 0.2667]
+                    }
+                }
+            ]
+        }
+    ]
+}

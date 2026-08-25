@@ -42,6 +42,7 @@ final class AppModel {
     private let appStartUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
     private var speechRestartTask: Task<Void, Never>?
     private var postStopMaskTask: Task<Void, Never>?
+    private var searchTimeoutTask: Task<Void, Never>?
     private var keyboardDigits = ""
     private var backgroundObserverTask: Task<Void, Never>?
     private var sceneDeactivationObserverTask: Task<Void, Never>?
@@ -279,6 +280,8 @@ final class AppModel {
     func showConfigurationError(_ message: String) {
         postStopMaskTask?.cancel()
         postStopMaskTask = nil
+        searchTimeoutTask?.cancel()
+        searchTimeoutTask = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         speechListener.stop()
@@ -376,6 +379,8 @@ final class AppModel {
     func markCurrentTrialStarted() {
         postStopMaskTask?.cancel()
         postStopMaskTask = nil
+        searchTimeoutTask?.cancel()
+        searchTimeoutTask = nil
         currentTrialMeasurement = .init(absoluteTrialStartMS: elapsedMilliseconds())
         DiagnosticLog.event("trial", "measurement started; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase))")
     }
@@ -510,6 +515,9 @@ final class AppModel {
                 let targetReadMS = elapsedMilliseconds()
                 currentTrialMeasurement?.digitRevealMS = targetReadMS
                 currentTrialMeasurement?.timerStartMS = targetReadMS
+                scheduleSearchTimeout(
+                    afterSeconds: experiment.configuration.maxSearchTimeSeconds
+                )
                 resultFileWriter.markFirstTargetRead(atMS: targetReadMS)
                 startTimedSessionIfNeeded()
                 DiagnosticLog.event("trial", "target cue confirmed; trial=\(currentTrialIndex + 1); search phase entered")
@@ -525,17 +533,38 @@ final class AppModel {
             return
         }
 
-        let answerCorrect = candidate == experiment.grid.verificationCode
+        let response: TrialResponse = candidate == experiment.grid.verificationCode
+            ? .correct
+            : .wrong
         guard let measurement = currentTrialMeasurement,
               let digitRevealMS = measurement.digitRevealMS,
               let timerStartMS = measurement.timerStartMS,
-              let stopSignalStartMS = measurement.stopSignalStartMS,
+              measurement.stopSignalStartMS != nil,
               let timerStopMS = measurement.timerStopMS else {
             statusMessage = "Use the configured stop command before entering the crossing number."
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
             return
         }
-        if answerCorrect {
+        completeTrial(
+            response: response,
+            digitRevealMS: digitRevealMS,
+            timerStartMS: timerStartMS,
+            timerStopMS: timerStopMS,
+            status: "\(response == .correct ? "Correct" : "Incorrect") — \(spoken ? "heard" : "entered") \(candidate)."
+        )
+    }
+
+    private func completeTrial(
+        response: TrialResponse,
+        digitRevealMS: UInt64,
+        timerStartMS: UInt64,
+        timerStopMS: UInt64,
+        status: String
+    ) {
+        guard let experiment, let measurement = currentTrialMeasurement else { return }
+        searchTimeoutTask?.cancel()
+        searchTimeoutTask = nil
+        if response == .correct {
             feedbackSoundPlayer.playCorrect()
         } else {
             feedbackSoundPlayer.playWrong()
@@ -547,21 +576,26 @@ final class AppModel {
                     absoluteTrialStartMS: measurement.absoluteTrialStartMS,
                     digitRevealMS: digitRevealMS,
                     timerStartMS: timerStartMS,
-                    stopSignalStartMS: stopSignalStartMS,
+                    stopSignalStartMS: measurement.stopSignalStartMS,
                     timerStopMS: timerStopMS,
-                    answerCorrect: answerCorrect,
+                    response: response,
                     speech: measurement.speech,
                     keyboard: measurement.keyboard
                 )
             )
-            if answerCorrect { completedTargetCount += 1 }
-            DiagnosticLog.event("result", "trial saved; trial=\(currentTrialIndex + 1) correct=\(answerCorrect) score=\(completedTargetCount) stopSignalMS=\(stopSignalStartMS)")
-            statusMessage = "\(answerCorrect ? "Correct" : "Incorrect") — \(spoken ? "heard" : "entered") \(candidate)."
-            let highlightEnabled = answerCorrect
+            if response == .correct { completedTargetCount += 1 }
+            DiagnosticLog.event(
+                "result",
+                "trial saved; trial=\(currentTrialIndex + 1) response=\(response.rawValue) "
+                    + "score=\(completedTargetCount) "
+                    + "stopSignalMS=\(measurement.stopSignalStartMS.map { String($0) } ?? "none")"
+            )
+            statusMessage = status
+            let highlightEnabled = response == .correct
                 ? experiment.configuration.stimulus.digitHighlightCorrectRGB != nil
                 : experiment.configuration.stimulus.digitHighlightWrongRGB != nil
             if highlightEnabled {
-                stimulusPresentationState.highlightSolution(correct: answerCorrect)
+                stimulusPresentationState.highlightSolution(correct: response == .correct)
             }
             trialPhase = .transitioning
             scheduleCompletedTrialAdvance()
@@ -570,6 +604,45 @@ final class AppModel {
             print("SmartFOV123 result error: \(error.localizedDescription)")
             scheduleSpeechRestart(afterNanoseconds: 2_000_000_000)
         }
+    }
+
+    private func scheduleSearchTimeout(afterSeconds seconds: Float) {
+        searchTimeoutTask?.cancel()
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(Double(seconds)))
+        searchTimeoutTask = Task { @MainActor [weak self] in
+            do {
+                try await clock.sleep(until: deadline)
+            } catch {
+                return
+            }
+            self?.handleSearchTimeout()
+        }
+    }
+
+    private func handleSearchTimeout() {
+        guard trialPhase == .search,
+              let measurement = currentTrialMeasurement,
+              let digitRevealMS = measurement.digitRevealMS,
+              let timerStartMS = measurement.timerStartMS,
+              measurement.stopSignalStartMS == nil else { return }
+        searchTimeoutTask = nil
+        let timerStopMS = elapsedMilliseconds()
+        currentTrialMeasurement?.timerStopMS = timerStopMS
+        pauseTimedSession()
+        speechListener.pauseForFeedback()
+        DiagnosticLog.event(
+            "trial",
+            "search timed out; trial=\(currentTrialIndex + 1) limitSeconds="
+                + "\(experiment?.configuration.maxSearchTimeSeconds ?? 0)"
+        )
+        completeTrial(
+            response: .timedOut,
+            digitRevealMS: digitRevealMS,
+            timerStartMS: timerStartMS,
+            timerStopMS: timerStopMS,
+            status: "Search timed out."
+        )
     }
 
     private func shouldUseSpeech(in phase: TrialPhase) -> Bool {
@@ -627,6 +700,8 @@ final class AppModel {
     private func stopSearchTimer(atMS milliseconds: UInt64) {
         guard trialPhase == .search,
               currentTrialMeasurement?.stopSignalStartMS == nil else { return }
+        searchTimeoutTask?.cancel()
+        searchTimeoutTask = nil
         currentTrialMeasurement?.stopSignalStartMS = milliseconds
         pauseTimedSession()
         currentTrialMeasurement?.timerStopMS = elapsedMilliseconds()
@@ -657,6 +732,8 @@ final class AppModel {
     func advanceAfterCompletedTrial() {
         postStopMaskTask?.cancel()
         postStopMaskTask = nil
+        searchTimeoutTask?.cancel()
+        searchTimeoutTask = nil
         guard let plan, !hasTimedSessionEnded else { return }
         if plan.taskMode == .fixedNumberOfTrials,
            currentTrialIndex >= plan.trials.count {
@@ -1067,6 +1144,8 @@ final class AppModel {
         hasTimedSessionEnded = true
         postStopMaskTask?.cancel()
         postStopMaskTask = nil
+        searchTimeoutTask?.cancel()
+        searchTimeoutTask = nil
         DiagnosticLog.event("session", "timed session finishing; durationSeconds=\(durationSeconds) score=\(completedTargetCount)")
         stimulusPresentationState.stopTimeBar()
         countdownAudioPlayer.pause()
@@ -1111,6 +1190,8 @@ final class AppModel {
         timedSessionTask?.cancel()
         timedSessionTask = nil
         timedSessionSearchStartNanoseconds = nil
+        searchTimeoutTask?.cancel()
+        searchTimeoutTask = nil
         speechRestartTask?.cancel()
         speechRestartTask = nil
         stimulusPresentationState.hide()
