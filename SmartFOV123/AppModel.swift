@@ -27,6 +27,7 @@ final class AppModel {
 
     let immersiveSpaceID = "SmartFOV123Space"
     private let availablePlans: [ExperimentPlan]
+    private let invalidProtocols: [ProtocolCatalog.InvalidProtocol]
     let foveatedRendering: Bool
     private(set) var plan: ExperimentPlan?
     let stimulusPresentationState = StimulusPresentationState()
@@ -73,12 +74,14 @@ final class AppModel {
         do {
             let catalog = try ProtocolCatalog.loadAvailable()
             availablePlans = catalog.plans
+            invalidProtocols = catalog.invalidProtocols
             foveatedRendering = catalog.foveatedRendering
             plan = nil
             trialPhase = .protocolSelection
-            DiagnosticLog.event("app", "protocol catalog loaded; plans=\(catalog.plans.count) foveated=\(catalog.foveatedRendering)")
+            DiagnosticLog.event("app", "protocol catalog loaded; plans=\(catalog.plans.count) invalid=\(catalog.invalidProtocols.count) foveated=\(catalog.foveatedRendering)")
         } catch {
             availablePlans = []
+            invalidProtocols = []
             foveatedRendering = true
             plan = nil
             trialPhase = .configurationError
@@ -125,12 +128,24 @@ final class AppModel {
                 usesLeadingAlignment: false
             )
         case .protocolSelection:
-            let names = availablePlans.enumerated().map {
+            let validNames = availablePlans.enumerated().map {
                 "\($0.offset + 1). \($0.element.protocolName)"
             }.joined(separator: "\n")
+            let invalidNames = invalidProtocols.enumerated().map {
+                "\(availablePlans.count + $0.offset + 1). \($0.element.filename)"
+            }.joined(separator: "\n")
+            var sections: [String] = []
+            if !validNames.isEmpty {
+                sections.append(validNames)
+            }
+            if !invalidNames.isEmpty {
+                sections.append(
+                    "The following protocols are present in the protocol folder but not valid:\n\(invalidNames)"
+                )
+            }
             return .init(
                 title: "SmartFOV123",
-                message: "\(names)\n\nSpeak number of protocol to run",
+                message: "\(sections.joined(separator: "\n\n"))\n\nSpeak number of protocol to inspect or run",
                 usesLeadingAlignment: true
             )
         case .keyboardUnavailable:
@@ -223,7 +238,7 @@ final class AppModel {
     }
 
     func prepareImmersivePresentation() {
-        if plan == nil, availablePlans.isEmpty {
+        if plan == nil, availablePlans.isEmpty, invalidProtocols.isEmpty {
             trialPhase = .configurationError
             stimulusPresentationState.hide()
         } else if plan == nil {
@@ -464,8 +479,7 @@ final class AppModel {
            plan.input.stopCommand == .speechStop,
            let stopSegment = segments.first(where: {
                $0.text.lowercased().split(whereSeparator: { !$0.isLetter }).contains("stop")
-           }),
-           hasUsableTiming(stopSegment) {
+           }) {
             stopSearchTimer(atMS: elapsedMilliseconds(atUptimeNanoseconds: stopSegment.startUptimeNanoseconds))
             speechListener.pauseForFeedback()
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
@@ -480,8 +494,7 @@ final class AppModel {
             maximumPauseSeconds: speech.maxInterdigitPauseSeconds
         )
         let candidate = String(attemptDigits.map(\.digit))
-        guard candidate.count == 3,
-              hasUsableOrderedTiming(attemptDigits) else {
+        guard candidate.count == 3 else {
             return
         }
         DiagnosticLog.event("speech", "three-digit candidate parsed; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase)) candidate=\(candidate)")
@@ -734,7 +747,7 @@ final class AppModel {
             let ordered = passSegments.sorted {
                 $0.startUptimeNanoseconds < $1.startUptimeNanoseconds
             }
-            guard let first = ordered.first, let last = ordered.last else { continue }
+            guard let first = ordered.first else { continue }
             let transcript = ordered.map(\.text).joined(separator: " ")
             let token = SpokenDigitParser.normalizedForStorage(
                 transcript,
@@ -746,9 +759,6 @@ final class AppModel {
                     token: token,
                     startMS: Int64(elapsedMilliseconds(
                         atUptimeNanoseconds: first.startUptimeNanoseconds
-                    )),
-                    stopMS: Int64(elapsedMilliseconds(
-                        atUptimeNanoseconds: last.stopUptimeNanoseconds
                     ))
                 )
             )
@@ -760,24 +770,6 @@ final class AppModel {
         let digit: Character
         let startUptimeNanoseconds: UInt64
         let stopUptimeNanoseconds: UInt64
-    }
-
-    private func hasUsableTiming(_ segment: TimedSpeechSegment) -> Bool {
-        segment.stopUptimeNanoseconds > segment.startUptimeNanoseconds
-            && elapsedMilliseconds(atUptimeNanoseconds: segment.stopUptimeNanoseconds)
-                > elapsedMilliseconds(atUptimeNanoseconds: segment.startUptimeNanoseconds)
-    }
-
-    private func hasUsableOrderedTiming(_ digits: [TimedDigit]) -> Bool {
-        guard digits.allSatisfy({ digit in
-            digit.stopUptimeNanoseconds > digit.startUptimeNanoseconds
-                && elapsedMilliseconds(atUptimeNanoseconds: digit.stopUptimeNanoseconds)
-                    > elapsedMilliseconds(atUptimeNanoseconds: digit.startUptimeNanoseconds)
-        }) else { return false }
-
-        return zip(digits, digits.dropFirst()).allSatisfy { previous, next in
-            next.startUptimeNanoseconds > previous.startUptimeNanoseconds
-        }
     }
 
     private func currentSpeechDigitAttempt(
@@ -845,8 +837,15 @@ final class AppModel {
     }
 
     private func handleProtocolSelection(_ transcript: String) {
-        guard let selection = Self.spokenProtocolNumber(transcript),
-              availablePlans.indices.contains(selection - 1) else { return }
+        guard let selection = Self.spokenProtocolNumber(transcript) else { return }
+        if selection > availablePlans.count {
+            let invalidIndex = selection - availablePlans.count - 1
+            guard invalidProtocols.indices.contains(invalidIndex) else { return }
+            let invalid = invalidProtocols[invalidIndex]
+            showConfigurationError("\(invalid.filename)\n\n\(invalid.errorMessage)")
+            return
+        }
+        guard availablePlans.indices.contains(selection - 1) else { return }
         let selected = availablePlans[selection - 1]
 
         plan = selected

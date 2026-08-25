@@ -419,10 +419,15 @@ struct ExperimentPlan: Sendable {
 }
 
 struct ProtocolCatalog: Sendable {
-    private static let managedExampleName = "example_do_not_edit"
-    private static let legacyExampleName = "example"
+    struct InvalidProtocol: Sendable {
+        let filename: String
+        let errorMessage: String
+    }
+
+    private static let managedFallbackName = "fallback_do_not_edit"
 
     let plans: [ExperimentPlan]
+    let invalidProtocols: [InvalidProtocol]
     let foveatedRendering: Bool
 
     static func loadAvailable() throws -> ProtocolCatalog {
@@ -452,49 +457,87 @@ struct ProtocolCatalog: Sendable {
             throw ExperimentError.protocolDirectoryUnavailable(error)
         }
 
-        try removeLegacyExample(in: protocolsURL, using: fileManager)
-        let userExampleURL = protocolsURL.appendingPathComponent(
-            "\(managedExampleName).json",
+        let userFallbackURL = protocolsURL.appendingPathComponent(
+            "\(managedFallbackName).json",
             isDirectory: false
         )
-        try installBundledExample(at: userExampleURL, using: fileManager)
+        try installBundledFallback(at: userFallbackURL, using: fileManager)
         let availableProtocolURLs = try protocolURLs(in: protocolsURL, using: fileManager)
 
         let visibleProtocolURLs = availableProtocolURLs.filter {
             !$0.deletingPathExtension().lastPathComponent.hasPrefix("_")
         }
         let userProtocolURLs = visibleProtocolURLs.filter {
-            $0.deletingPathExtension().lastPathComponent != managedExampleName
+            $0.deletingPathExtension().lastPathComponent != managedFallbackName
         }
-        let candidates = userProtocolURLs.isEmpty
-            ? visibleProtocolURLs.filter {
-                $0.deletingPathExtension().lastPathComponent == managedExampleName
+        let fallbackURLs = visibleProtocolURLs.filter {
+            $0.deletingPathExtension().lastPathComponent == managedFallbackName
+        }
+
+        func load(_ urls: [URL]) -> (plans: [ExperimentPlan], invalid: [InvalidProtocol]) {
+            var plans: [ExperimentPlan] = []
+            var invalid: [InvalidProtocol] = []
+            for url in urls {
+                let name = url.deletingPathExtension().lastPathComponent
+                do {
+                    plans.append(try ExperimentPlan.load(from: url, protocolName: name))
+                } catch {
+                    invalid.append(
+                        .init(
+                            filename: url.lastPathComponent,
+                            errorMessage: error.localizedDescription
+                        )
+                    )
+                }
             }
-            : userProtocolURLs
-        var validPlans: [ExperimentPlan] = []
-        var failures: [String] = []
-        for url in candidates {
-            let name = url.deletingPathExtension().lastPathComponent
-            do {
-                validPlans.append(try ExperimentPlan.load(from: url, protocolName: name))
-            } catch {
-                failures.append("\(name): \(error.localizedDescription)")
+            plans.sort {
+                $0.protocolName.localizedStandardCompare($1.protocolName) == .orderedAscending
             }
+            invalid.sort {
+                $0.filename.localizedStandardCompare($1.filename) == .orderedAscending
+            }
+            return (plans, invalid)
         }
-        validPlans.sort { $0.protocolName.localizedStandardCompare($1.protocolName) == .orderedAscending }
-        guard !validPlans.isEmpty else {
-            let detail = failures.isEmpty
-                ? "No visible JSON protocol files were found in the Documents/protocols folder."
-                : failures.joined(separator: "\n")
-            throw ExperimentError.invalidConfiguration(detail)
+
+        let userCatalog = load(userProtocolURLs)
+        let selectedCatalog: (plans: [ExperimentPlan], invalid: [InvalidProtocol])
+        if userCatalog.plans.isEmpty {
+            let fallbackCatalog = load(fallbackURLs)
+            selectedCatalog = (
+                plans: fallbackCatalog.plans,
+                invalid: (userCatalog.invalid + fallbackCatalog.invalid).sorted {
+                    $0.filename.localizedStandardCompare($1.filename) == .orderedAscending
+                }
+            )
+        } else {
+            selectedCatalog = userCatalog
         }
-        let foveationValues = Set(validPlans.map(\.foveatedRendering))
-        guard foveationValues.count == 1, let foveatedRendering = foveationValues.first else {
+        let validPlans = selectedCatalog.plans
+        let invalidProtocols = selectedCatalog.invalid
+
+        guard !validPlans.isEmpty || !invalidProtocols.isEmpty else {
             throw ExperimentError.invalidConfiguration(
-                "All visible protocols must use the same foveated_rendering value because compositor configuration is fixed before spoken protocol selection."
+                "No visible JSON protocol files were found in the Documents/protocols folder."
             )
         }
-        return .init(plans: validPlans, foveatedRendering: foveatedRendering)
+        let foveationValues = Set(validPlans.map(\.foveatedRendering))
+        if validPlans.isEmpty {
+            return .init(
+                plans: [],
+                invalidProtocols: invalidProtocols,
+                foveatedRendering: true
+            )
+        }
+        guard foveationValues.count == 1, let foveatedRendering = foveationValues.first else {
+            throw ExperimentError.invalidConfiguration(
+                "All valid protocols must use the same foveated_rendering value because compositor configuration is fixed before spoken protocol selection."
+            )
+        }
+        return .init(
+            plans: validPlans,
+            invalidProtocols: invalidProtocols,
+            foveatedRendering: foveatedRendering
+        )
     }
 
     private static func protocolURLs(in directoryURL: URL, using fileManager: FileManager) throws -> [URL] {
@@ -514,30 +557,16 @@ struct ProtocolCatalog: Sendable {
         }
     }
 
-    private static func removeLegacyExample(
-        in protocolsURL: URL,
-        using fileManager: FileManager
-    ) throws {
-        let legacyURL = protocolsURL.appendingPathComponent("\(legacyExampleName).json")
-        guard fileManager.fileExists(atPath: legacyURL.path) else { return }
-
-        do {
-            try fileManager.removeItem(at: legacyURL)
-        } catch {
-            throw ExperimentError.couldNotRestoreExample(error)
-        }
-    }
-
-    private static func installBundledExample(
+    private static func installBundledFallback(
         at destinationURL: URL,
         using fileManager: FileManager
     ) throws {
-        guard let sourceURL = bundledExampleURL() else {
+        guard let sourceURL = bundledFallbackURL() else {
             throw ExperimentError.missingConfiguration
         }
 
         let stagedURL = destinationURL.deletingLastPathComponent().appendingPathComponent(
-            "_\(managedExampleName)_restore_\(UUID().uuidString).json"
+            "_\(managedFallbackName)_restore_\(UUID().uuidString).json"
         )
         defer {
             try? fileManager.removeItem(at: stagedURL)
@@ -550,14 +579,14 @@ struct ProtocolCatalog: Sendable {
                 try fileManager.moveItem(at: stagedURL, to: destinationURL)
             }
         } catch {
-            throw ExperimentError.couldNotRestoreExample(error)
+            throw ExperimentError.couldNotRestoreFallback(error)
         }
     }
 
-    private static func bundledExampleURL() -> URL? {
-        Bundle.main.url(forResource: managedExampleName, withExtension: "json")
+    private static func bundledFallbackURL() -> URL? {
+        Bundle.main.url(forResource: managedFallbackName, withExtension: "json")
             ?? Bundle.main.url(
-                forResource: managedExampleName,
+                forResource: managedFallbackName,
                 withExtension: "json",
                 subdirectory: "Protocols"
             )
@@ -567,18 +596,18 @@ struct ProtocolCatalog: Sendable {
 enum ExperimentError: LocalizedError {
     case missingConfiguration
     case protocolDirectoryUnavailable(Error)
-    case couldNotRestoreExample(Error)
+    case couldNotRestoreFallback(Error)
     case unreadableConfiguration(Error)
     case invalidConfiguration(String)
 
     var errorDescription: String? {
         switch self {
         case .missingConfiguration:
-            return "The bundled example protocol is unavailable."
+            return "The bundled fallback protocol is unavailable."
         case .protocolDirectoryUnavailable(let error):
             return "The Documents/protocols directory is unavailable: \(error.localizedDescription)"
-        case .couldNotRestoreExample(let error):
-            return "The bundled example protocol couldn't be restored to Documents/protocols: \(error.localizedDescription)"
+        case .couldNotRestoreFallback(let error):
+            return "The bundled fallback protocol couldn't be restored to Documents/protocols: \(error.localizedDescription)"
         case .unreadableConfiguration(let error):
             return "The protocol file couldn't be read: \(error.localizedDescription)"
         case .invalidConfiguration(let message):

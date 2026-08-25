@@ -293,8 +293,7 @@ struct CompletedTrialResults: Encodable {
             .init(
                 id: $0.id,
                 token: $0.token,
-                startMS: $0.startMS - signedTrialStartMS,
-                stopMS: $0.stopMS - signedTrialStartMS
+                startMS: $0.startMS - signedTrialStartMS
             )
         }
         self.keyboard = keyboard.map {
@@ -309,12 +308,11 @@ struct CompletedTrialResults: Encodable {
         let id: String
         let token: String
         let startMS: Int64
-        let stopMS: Int64
 
         func encode(to encoder: Encoder) throws {
             var outer = encoder.container(keyedBy: DynamicCodingKey.self)
             try outer.encode(
-                SpeechTiming(startMS: startMS, stopMS: stopMS),
+                SpeechTiming(startMS: startMS),
                 forKey: .init(token)
             )
         }
@@ -335,11 +333,9 @@ struct CompletedTrialResults: Encodable {
 
     private struct SpeechTiming: Encodable {
         let startMS: Int64
-        let stopMS: Int64
 
         private enum CodingKeys: String, CodingKey {
             case startMS = "start_ms"
-            case stopMS = "stop_ms"
         }
     }
 
@@ -762,7 +758,7 @@ private enum JSONPrettyPrinter {
         } else if dictionary.keys.contains("absolute_trial_start_ms") {
             preferredOrder = ["absolute_trial_start_ms", "digit_reveal_ms", "timer_start_ms", "stop_signal_start_ms", "timer_stop_ms", "answer_correct", "speech", "keyboard"]
         } else if dictionary.keys.contains("start_ms") {
-            preferredOrder = ["start_ms", "stop_ms"]
+            preferredOrder = ["start_ms"]
         } else if dictionary.keys.contains("back_height_degrees") {
             preferredOrder = [
                 "fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb",
