@@ -293,7 +293,7 @@ struct CompletedTrialResults: Encodable {
             .init(
                 id: $0.id,
                 token: $0.token,
-                startMS: $0.startMS - signedTrialStartMS
+                recognizedMS: $0.recognizedMS - signedTrialStartMS
             )
         }
         self.keyboard = keyboard.map {
@@ -307,12 +307,12 @@ struct CompletedTrialResults: Encodable {
     struct SpeechDetection: Encodable {
         let id: String
         let token: String
-        let startMS: Int64
+        let recognizedMS: Int64
 
         func encode(to encoder: Encoder) throws {
             var outer = encoder.container(keyedBy: DynamicCodingKey.self)
             try outer.encode(
-                SpeechTiming(startMS: startMS),
+                SpeechTiming(recognizedMS: recognizedMS),
                 forKey: .init(token)
             )
         }
@@ -332,10 +332,10 @@ struct CompletedTrialResults: Encodable {
     }
 
     private struct SpeechTiming: Encodable {
-        let startMS: Int64
+        let recognizedMS: Int64
 
         private enum CodingKeys: String, CodingKey {
-            case startMS = "start_ms"
+            case recognizedMS = "recognized_ms"
         }
     }
 
@@ -493,8 +493,12 @@ private struct CompletedTrial: Encodable {
                 peakOpacity: configuration.display.peakOpacity,
                 widthDegrees: stimulus.fovWidthDegrees,
                 heightDegrees: stimulus.fovHeightDegrees,
-                zoomedWidthDegrees: stimulus.fovZoomedWidthDegrees,
-                zoomedHeightDegrees: stimulus.fovZoomedHeightDegrees,
+                zoomedWidthDegrees: stimulus.fovZoomedWidthDegrees.map {
+                    .degrees($0)
+                } ?? .disabled,
+                zoomedHeightDegrees: stimulus.fovZoomedHeightDegrees.map {
+                    .degrees($0)
+                } ?? .disabled,
                 horizontalOffsetDegrees: stimulus.fovHorizontalOffsetDegrees,
                 verticalOffsetDegrees: stimulus.fovVerticalOffsetDegrees,
                 distanceMeters: stimulus.distanceMeters
@@ -614,13 +618,26 @@ private struct CompletedTrial: Encodable {
     }
 
     struct FOV: Encodable {
+        enum Zoom: Encodable {
+            case degrees(Float)
+            case disabled
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case .degrees(let value): try container.encode(value)
+                case .disabled: try container.encode("disabled")
+                }
+            }
+        }
+
         let eye: String
         let mode: String
         let peakOpacity: Float
         let widthDegrees: Float
         let heightDegrees: Float
-        let zoomedWidthDegrees: Float
-        let zoomedHeightDegrees: Float
+        let zoomedWidthDegrees: Zoom
+        let zoomedHeightDegrees: Zoom
         let horizontalOffsetDegrees: Float
         let verticalOffsetDegrees: Float
         let distanceMeters: Float
@@ -759,6 +776,8 @@ private enum JSONPrettyPrinter {
             preferredOrder = ["absolute_trial_start_ms", "digit_reveal_ms", "timer_start_ms", "stop_signal_start_ms", "timer_stop_ms", "answer_correct", "speech", "keyboard"]
         } else if dictionary.keys.contains("start_ms") {
             preferredOrder = ["start_ms"]
+        } else if dictionary.keys.contains("recognized_ms") {
+            preferredOrder = ["recognized_ms"]
         } else if dictionary.keys.contains("back_height_degrees") {
             preferredOrder = [
                 "fill_rgb", "height_degrees", "corner_radius_degrees", "back_rgb",

@@ -739,6 +739,7 @@ final class AppModel {
         aliases: [String: Int]
     ) {
         guard currentTrialMeasurement != nil else { return }
+        let recognizedMS = Int64(elapsedMilliseconds())
         let recognitionPasses = Dictionary(grouping: segments, by: \.recognitionPass)
         currentTrialMeasurement?.speech.removeAll { event in
             recognitionPasses.keys.contains { event.id.hasPrefix("\($0)-") }
@@ -747,7 +748,7 @@ final class AppModel {
             let ordered = passSegments.sorted {
                 $0.startUptimeNanoseconds < $1.startUptimeNanoseconds
             }
-            guard let first = ordered.first else { continue }
+            guard !ordered.isEmpty else { continue }
             let transcript = ordered.map(\.text).joined(separator: " ")
             let token = SpokenDigitParser.normalizedForStorage(
                 transcript,
@@ -757,13 +758,11 @@ final class AppModel {
                 .init(
                     id: "\(pass)-utterance",
                     token: token,
-                    startMS: Int64(elapsedMilliseconds(
-                        atUptimeNanoseconds: first.startUptimeNanoseconds
-                    ))
+                    recognizedMS: recognizedMS
                 )
             )
         }
-        currentTrialMeasurement?.speech.sort { $0.startMS < $1.startMS }
+        currentTrialMeasurement?.speech.sort { $0.recognizedMS < $1.recognizedMS }
     }
 
     private struct TimedDigit {

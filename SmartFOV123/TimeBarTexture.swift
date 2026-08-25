@@ -26,10 +26,10 @@ struct TimeBarTexture {
             degrees: stimulus.timeBarCornerRadiusArcmin / 60,
             distance: stimulus.distanceMeters
         )
-        let width = max(2, Int((1024 * stimulus.fovWidthScaleFactor).rounded()))
+        let width = max(2, Int((1024 * abs(stimulus.fovWidthScaleFactor)).rounded()))
         let height = max(
             2,
-            Int((1024 * heightMeters / widthMeters * stimulus.fovHeightScaleFactor).rounded())
+            Int((1024 * heightMeters / widthMeters * abs(stimulus.fovHeightScaleFactor)).rounded())
         )
         let bytesPerRow = width * 4
         var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)

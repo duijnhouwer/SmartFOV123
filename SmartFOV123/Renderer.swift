@@ -60,18 +60,18 @@ private struct StimulusGeometry {
         )
         fovHalfSizeMeters = SIMD2(
             Self.sizeMeters(
-                degrees: configuration.fovZoomedWidthDegrees,
+                degrees: configuration.effectiveFOVZoomedWidthDegrees,
                 distance: configuration.distanceMeters
             ) / 2,
             Self.sizeMeters(
-                degrees: configuration.fovZoomedHeightDegrees,
+                degrees: configuration.effectiveFOVZoomedHeightDegrees,
                 distance: configuration.distanceMeters
             ) / 2
         )
         digitHeightMeters = Self.sizeMeters(
             degrees: configuration.digitHeightArcmin / 60,
             distance: configuration.distanceMeters
-        ) * configuration.fovHeightScaleFactor
+        ) * abs(configuration.fovHeightScaleFactor)
         let tileWidthMeters = Self.sizeMeters(
             degrees: configuration.tileWidthArcmin / 60,
             distance: configuration.distanceMeters
@@ -816,7 +816,7 @@ actor Renderer {
                     || shouldRenderStimulus(viewIndex: viewIndex, viewTransform: view.transform)) {
                 let fraction = min(max(presentationState.timeBarFillFraction, 0), 1)
                 let width = geometry.timeBarWidthMeters * fraction
-                if width > 0 {
+                if abs(width) > 0 {
                     encoder.setFragmentTexture(timeBarTexture.texture, index: 0)
                     drawTexturedQuad(
                         encoder: encoder,

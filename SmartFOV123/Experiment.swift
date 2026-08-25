@@ -247,18 +247,26 @@ struct StimulusConfiguration: Sendable {
 
     let fovWidthDegrees: Float
     let fovHeightDegrees: Float
-    let fovZoomedWidthDegrees: Float
-    let fovZoomedHeightDegrees: Float
+    let fovZoomedWidthDegrees: Float?
+    let fovZoomedHeightDegrees: Float?
     let fovHorizontalOffsetDegrees: Float
     let fovVerticalOffsetDegrees: Float
     let distanceMeters: Float
 
+    var effectiveFOVZoomedWidthDegrees: Float {
+        fovZoomedWidthDegrees ?? fovWidthDegrees
+    }
+
+    var effectiveFOVZoomedHeightDegrees: Float {
+        fovZoomedHeightDegrees ?? fovHeightDegrees
+    }
+
     var fovWidthScaleFactor: Float {
-        Self.planarScaleFactor(from: fovWidthDegrees, to: fovZoomedWidthDegrees)
+        Self.planarScaleFactor(from: fovWidthDegrees, to: effectiveFOVZoomedWidthDegrees)
     }
 
     var fovHeightScaleFactor: Float {
-        Self.planarScaleFactor(from: fovHeightDegrees, to: fovZoomedHeightDegrees)
+        Self.planarScaleFactor(from: fovHeightDegrees, to: effectiveFOVZoomedHeightDegrees)
     }
 
     private static func planarScaleFactor(from sourceDegrees: Float, to zoomedDegrees: Float) -> Float {
@@ -670,6 +678,26 @@ private enum HighlightSpecification: Decodable {
     }
 }
 
+private enum ZoomSpecification: Decodable {
+    case degrees(Float)
+    case disabled
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let keyword = try? container.decode(String.self) {
+            guard keyword == "disabled" else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Expected a number or the string ‘disabled’."
+                )
+            }
+            self = .disabled
+        } else {
+            self = .degrees(try container.decode(Float.self))
+        }
+    }
+}
+
 extension RandomSeedSpecification: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -808,8 +836,8 @@ private struct FOVPatch: Decodable {
     let peakOpacity: Float?
     let widthDegrees: Float?
     let heightDegrees: Float?
-    let zoomedWidthDegrees: Float?
-    let zoomedHeightDegrees: Float?
+    let zoomedWidthDegrees: ZoomSpecification?
+    let zoomedHeightDegrees: ZoomSpecification?
     let horizontalOffsetDegrees: Float?
     let verticalOffsetDegrees: Float?
     let distanceMeters: Float?
@@ -988,8 +1016,8 @@ private struct ResolvedFOV {
     var peakOpacity: Float?
     var widthDegrees: Float?
     var heightDegrees: Float?
-    var zoomedWidthDegrees: Float?
-    var zoomedHeightDegrees: Float?
+    var zoomedWidthDegrees: ZoomSpecification?
+    var zoomedHeightDegrees: ZoomSpecification?
     var horizontalOffsetDegrees: Float?
     var verticalOffsetDegrees: Float?
     var distanceMeters: Float?
@@ -1240,8 +1268,22 @@ private enum ConditionResolver {
         guard let passthroughDimming = patch.passthroughDimming else { try missing("passthrough_dimming") }
         guard let fovWidth = patch.fov.widthDegrees else { try missing("fov.width_degrees") }
         guard let fovHeight = patch.fov.heightDegrees else { try missing("fov.height_degrees") }
-        guard let fovZoomedWidth = patch.fov.zoomedWidthDegrees else { try missing("fov.zoomed_width_degrees") }
-        guard let fovZoomedHeight = patch.fov.zoomedHeightDegrees else { try missing("fov.zoomed_height_degrees") }
+        guard let fovZoomedWidthSpecification = patch.fov.zoomedWidthDegrees else {
+            try missing("fov.zoomed_width_degrees")
+        }
+        guard let fovZoomedHeightSpecification = patch.fov.zoomedHeightDegrees else {
+            try missing("fov.zoomed_height_degrees")
+        }
+        let fovZoomedWidth: Float
+        switch fovZoomedWidthSpecification {
+        case .degrees(let degrees): fovZoomedWidth = degrees
+        case .disabled: fovZoomedWidth = fovWidth
+        }
+        let fovZoomedHeight: Float
+        switch fovZoomedHeightSpecification {
+        case .degrees(let degrees): fovZoomedHeight = degrees
+        case .disabled: fovZoomedHeight = fovHeight
+        }
         guard let horizontalOffset = patch.fov.horizontalOffsetDegrees else { try missing("fov.horizontal_offset_degrees") }
         guard let verticalOffset = patch.fov.verticalOffsetDegrees else { try missing("fov.vertical_offset_degrees") }
         guard let distance = patch.fov.distanceMeters else { try missing("fov.distance_meters") }
@@ -1255,8 +1297,6 @@ private enum ConditionResolver {
             ("tiles.height_degrees", tileHeight),
             ("fov.width_degrees", fovWidth),
             ("fov.height_degrees", fovHeight),
-            ("fov.zoomed_width_degrees", fovZoomedWidth),
-            ("fov.zoomed_height_degrees", fovZoomedHeight),
             ("fov.distance_meters", distance)
         ]
         for (name, value) in positive where !value.isFinite || value <= 0 {
@@ -1264,11 +1304,18 @@ private enum ConditionResolver {
         }
         for (name, value) in [
             ("fov.width_degrees", fovWidth),
-            ("fov.height_degrees", fovHeight),
-            ("fov.zoomed_width_degrees", fovZoomedWidth),
-            ("fov.zoomed_height_degrees", fovZoomedHeight)
+            ("fov.height_degrees", fovHeight)
         ] where value >= 180 {
             throw invalid(definitionName, "\(name) must be less than 180 degrees.")
+        }
+        for (name, value) in [
+            ("fov.zoomed_width_degrees", fovZoomedWidth),
+            ("fov.zoomed_height_degrees", fovZoomedHeight)
+        ] where !value.isFinite || value == 0 || abs(value) >= 180 {
+            throw invalid(
+                definitionName,
+                "\(name) must be ‘disabled’ or a nonzero finite value between -180 and 180 degrees."
+            )
         }
         let nonnegative: [(String, Float)] = [
             ("tiles.gutter_degrees", tileGutter),
@@ -1525,8 +1572,18 @@ private enum ConditionResolver {
                 surroundOuterCornerRadiusArcmin: patch.surround.outerCornerRadiusDegrees! * 60,
                 fovWidthDegrees: patch.fov.widthDegrees!,
                 fovHeightDegrees: patch.fov.heightDegrees!,
-                fovZoomedWidthDegrees: patch.fov.zoomedWidthDegrees!,
-                fovZoomedHeightDegrees: patch.fov.zoomedHeightDegrees!,
+                fovZoomedWidthDegrees: {
+                    switch patch.fov.zoomedWidthDegrees! {
+                    case .degrees(let degrees): degrees
+                    case .disabled: nil
+                    }
+                }(),
+                fovZoomedHeightDegrees: {
+                    switch patch.fov.zoomedHeightDegrees! {
+                    case .degrees(let degrees): degrees
+                    case .disabled: nil
+                    }
+                }(),
                 fovHorizontalOffsetDegrees: patch.fov.horizontalOffsetDegrees!,
                 fovVerticalOffsetDegrees: patch.fov.verticalOffsetDegrees!,
                 distanceMeters: patch.fov.distanceMeters!
