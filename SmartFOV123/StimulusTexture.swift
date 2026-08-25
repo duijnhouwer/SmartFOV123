@@ -183,9 +183,22 @@ struct StimulusTexture {
                 transform: nil
             ))
             context.fillPath()
-            context.setFillColor(config.tileFillRGB.cgColor)
+            let highlightedIndices = presentation == .highlightedCorrect
+                || presentation == .highlightedWrong
+                ? Self.solutionIndices(in: experiment.grid)
+                : []
             for row in 0..<experiment.grid.rows {
                 for column in 0..<experiment.grid.columns {
+                    let index = row * experiment.grid.columns + column
+                    let tileRGB: RGB
+                    if highlightedIndices.contains(index) {
+                        tileRGB = presentation == .highlightedCorrect
+                            ? config.digitHighlightCorrectRGB ?? config.tileFillRGB
+                            : config.digitHighlightWrongRGB ?? config.tileFillRGB
+                    } else {
+                        tileRGB = config.tileFillRGB
+                    }
+                    context.setFillColor(tileRGB.cgColor)
                     let tileRect = CGRect(
                         x: tileFieldRect.minX + CGFloat(column) * (tileWidth + gutterWidth),
                         y: tileFieldRect.minY + CGFloat(row) * (tileHeight + gutterHeight),
@@ -232,10 +245,6 @@ struct StimulusTexture {
                 named: config.digitFontName,
                 capHeight: desiredDigitCapHeight
             )
-            let highlightDigitFont = try Self.font(
-                named: config.digitHighlightFontName,
-                capHeight: desiredDigitCapHeight
-            )
             let annotationFont = try Self.font(
                 named: config.annotationFontName,
                 capHeight: desiredAnnotationCapHeight
@@ -244,13 +253,6 @@ struct StimulusTexture {
                 NSAttributedString.Key(kCTFontAttributeName as String): digitFont,
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String):
                     config.digitRGB.cgColor
-            ]
-            let highlightDigitAttributes: [NSAttributedString.Key: Any] = [
-                NSAttributedString.Key(kCTFontAttributeName as String): highlightDigitFont,
-                NSAttributedString.Key(kCTForegroundColorAttributeName as String):
-                    (presentation == .highlightedCorrect
-                        ? config.digitHighlightCorrectRGB
-                        : config.digitHighlightWrongRGB).cgColor
             ]
             let annotationAttributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): annotationFont,
@@ -288,10 +290,6 @@ struct StimulusTexture {
                 in: context
             )
 
-            let highlightedIndices = presentation == .highlightedCorrect
-                || presentation == .highlightedWrong
-                ? Self.solutionIndices(in: experiment.grid)
-                : []
             for index in experiment.grid.digits.indices {
                 let row = index / experiment.grid.columns
                 let column = index % experiment.grid.columns
@@ -307,9 +305,7 @@ struct StimulusTexture {
                 Self.drawText(
                     glyph,
                     centeredAt: center,
-                    attributes: highlightedIndices.contains(index)
-                        ? highlightDigitAttributes
-                        : digitAttributes,
+                    attributes: digitAttributes,
                     in: context
                 )
             }

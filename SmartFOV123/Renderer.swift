@@ -122,8 +122,8 @@ private struct TrialRenderResources: @unchecked Sendable {
     let geometry: StimulusGeometry
     let maskedTexture: StimulusTexture
     let revealedTexture: StimulusTexture
-    let correctHighlightTexture: StimulusTexture
-    let wrongHighlightTexture: StimulusTexture
+    let correctHighlightTexture: StimulusTexture?
+    let wrongHighlightTexture: StimulusTexture?
     let timeBarTexture: TimeBarTexture?
     let taskMode: TaskMode
 }
@@ -493,24 +493,30 @@ actor Renderer {
                         trialsRemaining: request.trialsRemaining,
                         presentation: .revealed
                     ),
-                    correctHighlightTexture: StimulusTexture(
-                        device: device,
-                        commandQueue: textureCommandQueue,
-                        experiment: request.experiment,
-                        taskMode: request.taskMode,
-                        score: request.score,
-                        trialsRemaining: request.trialsRemaining,
-                        presentation: .highlightedCorrect
-                    ),
-                    wrongHighlightTexture: StimulusTexture(
-                        device: device,
-                        commandQueue: textureCommandQueue,
-                        experiment: request.experiment,
-                        taskMode: request.taskMode,
-                        score: request.score,
-                        trialsRemaining: request.trialsRemaining,
-                        presentation: .highlightedWrong
-                    ),
+                    correctHighlightTexture: request.experiment.configuration.stimulus
+                        .digitHighlightCorrectRGB == nil
+                        ? nil
+                        : try StimulusTexture(
+                            device: device,
+                            commandQueue: textureCommandQueue,
+                            experiment: request.experiment,
+                            taskMode: request.taskMode,
+                            score: request.score,
+                            trialsRemaining: request.trialsRemaining,
+                            presentation: .highlightedCorrect
+                        ),
+                    wrongHighlightTexture: request.experiment.configuration.stimulus
+                        .digitHighlightWrongRGB == nil
+                        ? nil
+                        : try StimulusTexture(
+                            device: device,
+                            commandQueue: textureCommandQueue,
+                            experiment: request.experiment,
+                            taskMode: request.taskMode,
+                            score: request.score,
+                            trialsRemaining: request.trialsRemaining,
+                            presentation: .highlightedWrong
+                        ),
                     timeBarTexture: request.taskMode.durationSeconds == nil
                         ? nil
                         : try TimeBarTexture(

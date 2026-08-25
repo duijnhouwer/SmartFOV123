@@ -452,9 +452,12 @@ private struct CompletedTrial: Encodable {
                 fontName: stimulus.digitFontName,
                 rgb: stimulus.digitRGB.array,
                 randomMethod: stimulus.digitRandomMethod.rawValue,
-                highlightCorrectRGB: stimulus.digitHighlightCorrectRGB.array,
-                highlightWrongRGB: stimulus.digitHighlightWrongRGB.array,
-                highlightFont: stimulus.digitHighlightFontName,
+                highlightCorrectRGB: stimulus.digitHighlightCorrectRGB.map {
+                    .color($0.array)
+                } ?? .disabled,
+                highlightWrongRGB: stimulus.digitHighlightWrongRGB.map {
+                    .color($0.array)
+                } ?? .disabled,
                 postStopVisibilitySeconds: stimulus.postStopVisibilitySeconds,
                 maskingCharacter: stimulus.maskingCharacter
             )
@@ -512,13 +515,25 @@ private struct CompletedTrial: Encodable {
     }
 
     struct Digits: Encodable {
+        enum Highlight: Encodable {
+            case color([Float])
+            case disabled
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case .color(let rgb): try container.encode(rgb)
+                case .disabled: try container.encode("disabled")
+                }
+            }
+        }
+
         let heightDegrees: Float
         let fontName: String
         let rgb: [Float]
         let randomMethod: String
-        let highlightCorrectRGB: [Float]
-        let highlightWrongRGB: [Float]
-        let highlightFont: String
+        let highlightCorrectRGB: Highlight
+        let highlightWrongRGB: Highlight
         let postStopVisibilitySeconds: Float
         let maskingCharacter: String
 
@@ -529,7 +544,6 @@ private struct CompletedTrial: Encodable {
             case randomMethod = "random_method"
             case highlightCorrectRGB = "highlight_correct_rgb"
             case highlightWrongRGB = "highlight_wrong_rgb"
-            case highlightFont = "highlight_font"
             case postStopVisibilitySeconds = "post_stop_visibility_seconds"
             case maskingCharacter = "masking_character"
         }
@@ -755,7 +769,7 @@ private enum JSONPrettyPrinter {
                 "back_height_degrees", "back_corner_radius_degrees"
             ]
         } else if dictionary.keys.contains("font_name") {
-            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "highlight_font", "post_stop_visibility_seconds", "masking_character"]
+            preferredOrder = ["height_degrees", "font_name", "font_rgb", "rgb", "random_method", "highlight_correct_rgb", "highlight_wrong_rgb", "post_stop_visibility_seconds", "masking_character"]
         } else if dictionary.keys.contains("number_horizontal") {
             preferredOrder = [
                 "width_degrees", "height_degrees", "gutter_degrees", "corner_radius_degrees",

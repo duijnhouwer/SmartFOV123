@@ -544,7 +544,12 @@ final class AppModel {
             if answerCorrect { completedTargetCount += 1 }
             DiagnosticLog.event("result", "trial saved; trial=\(currentTrialIndex + 1) correct=\(answerCorrect) score=\(completedTargetCount) stopSignalMS=\(stopSignalStartMS)")
             statusMessage = "\(answerCorrect ? "Correct" : "Incorrect") — \(spoken ? "heard" : "entered") \(candidate)."
-            stimulusPresentationState.highlightSolution(correct: answerCorrect)
+            let highlightEnabled = answerCorrect
+                ? experiment.configuration.stimulus.digitHighlightCorrectRGB != nil
+                : experiment.configuration.stimulus.digitHighlightWrongRGB != nil
+            if highlightEnabled {
+                stimulusPresentationState.highlightSolution(correct: answerCorrect)
+            }
             trialPhase = .transitioning
             scheduleCompletedTrialAdvance()
         } catch {
