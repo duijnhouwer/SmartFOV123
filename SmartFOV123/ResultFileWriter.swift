@@ -397,6 +397,7 @@ private struct CompletedTrial: Encodable {
         let targetNumber: Int
         let targetOrientation: String
         let responseNumber: Int
+        let numberOfFirstTwoDigitDuplicates: Int
         let grid: [[Int]]
 
         init(experiment: Experiment) {
@@ -409,6 +410,7 @@ private struct CompletedTrial: Encodable {
                 targetOrientation = "topdown"
             }
             responseNumber = Int(numberGrid.verificationCode)!
+            numberOfFirstTwoDigitDuplicates = numberGrid.numberOfFirstTwoDigitDuplicates
             grid = (0..<numberGrid.rows).map { row in
                 (0..<numberGrid.columns).map { column in
                     Int(numberGrid.digits[row * numberGrid.columns + column] - 48)
@@ -421,6 +423,7 @@ private struct CompletedTrial: Encodable {
             case targetNumber = "target_number"
             case targetOrientation = "target_orientation"
             case responseNumber = "response_number"
+            case numberOfFirstTwoDigitDuplicates = "number_of_first_two_digit_duplicates"
         }
     }
 
@@ -771,7 +774,10 @@ private enum JSONPrettyPrinter {
         } else if dictionary.keys.contains("start_digits") {
             preferredOrder = ["start_digits", "stop_command", "cross_digits", "speech"]
         } else if dictionary.keys.contains("target_number") {
-            preferredOrder = ["target_number", "target_orientation", "response_number", "grid"]
+            preferredOrder = [
+                "target_number", "target_orientation", "response_number",
+                "number_of_first_two_digit_duplicates", "grid"
+            ]
         } else if dictionary.keys.contains("absolute_trial_start_ms") {
             preferredOrder = ["absolute_trial_start_ms", "digit_reveal_ms", "timer_start_ms", "stop_signal_start_ms", "timer_stop_ms", "answer_correct", "speech", "keyboard"]
         } else if dictionary.keys.contains("start_ms") {

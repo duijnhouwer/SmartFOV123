@@ -1,4 +1,5 @@
 import CoreText
+import Dispatch
 import Foundation
 
 struct RGB: Decodable, Sendable {
@@ -300,6 +301,7 @@ struct NumberGrid: Sendable {
     let targetNumber: String
     let targetPlacement: Placement
     let verificationCode: String
+    let numberOfFirstTwoDigitDuplicates: Int
 
     func digit(at index: Int) -> Character {
         Character(UnicodeScalar(digits[index]))
@@ -2099,6 +2101,24 @@ private enum JSONShapeValidator {
 }
 
 private enum NumberGridGenerator {
+    private static let searchBudgetNanoseconds: UInt64 = 100_000_000
+
+    private struct IssueScore: Comparable {
+        let extraFullSequenceOccurrences: Int
+        let extraTargetPrefixOccurrences: Int
+
+        var isPerfect: Bool {
+            extraFullSequenceOccurrences == 0 && extraTargetPrefixOccurrences == 0
+        }
+
+        static func < (lhs: IssueScore, rhs: IssueScore) -> Bool {
+            if lhs.extraFullSequenceOccurrences != rhs.extraFullSequenceOccurrences {
+                return lhs.extraFullSequenceOccurrences < rhs.extraFullSequenceOccurrences
+            }
+            return lhs.extraTargetPrefixOccurrences < rhs.extraTargetPrefixOccurrences
+        }
+    }
+
     static func makeGrid(
         using config: StimulusConfiguration,
         randomSeed: UInt64
@@ -2106,8 +2126,13 @@ private enum NumberGridGenerator {
         let rows = config.numberOfTilesVertical
         let columns = config.numberOfTilesHorizontal
         var random = SplitMix64(seed: randomSeed)
+        let deadline = DispatchTime.now().uptimeNanoseconds + searchBudgetNanoseconds
+        var bestGrid: NumberGrid?
+        var bestScore: IssueScore?
+        var candidateCount = 0
 
         while true {
+            candidateCount += 1
             let targetNumber = makeTargetNumber(using: &random)
             let number = Array(targetNumber.utf8)
             let orientations = NumberGrid.Orientation.allThatFit(
@@ -2159,10 +2184,6 @@ private enum NumberGridGenerator {
                 availableIndex += 1
             }
 
-            guard findOccurrences(of: number, in: digits, rows: rows, columns: columns) == [placement] else {
-                continue
-            }
-
             let middleOffset = number.count / 2
             let middleRow = placement.row + (orientation == .vertical ? middleOffset : 0)
             let middleColumn = placement.column + (orientation == .horizontal ? middleOffset : 0)
@@ -2178,15 +2199,58 @@ private enum NumberGridGenerator {
                 }
             }
             let verificationDigits = verificationIndices.map { digits[$0] }
-
-            return NumberGrid(
+            let targetOccurrenceCount = findOccurrences(
+                of: number,
+                in: digits,
+                rows: rows,
+                columns: columns
+            ).count
+            let verificationOccurrenceCount = findOccurrences(
+                of: verificationDigits,
+                in: digits,
+                rows: rows,
+                columns: columns
+            ).count
+            let targetPrefixOccurrenceCount = findOccurrences(
+                of: Array(number.prefix(2)),
+                in: digits,
+                rows: rows,
+                columns: columns
+            ).count
+            let numberOfFirstTwoDigitDuplicates = max(0, targetPrefixOccurrenceCount - 1)
+            let grid = NumberGrid(
                 rows: rows,
                 columns: columns,
                 digits: digits,
                 targetNumber: targetNumber,
                 targetPlacement: placement,
-                verificationCode: String(bytes: verificationDigits, encoding: .ascii)!
+                verificationCode: String(bytes: verificationDigits, encoding: .ascii)!,
+                numberOfFirstTwoDigitDuplicates: numberOfFirstTwoDigitDuplicates
             )
+            let score = IssueScore(
+                extraFullSequenceOccurrences: max(0, targetOccurrenceCount - 1)
+                    + max(0, verificationOccurrenceCount - 1),
+                extraTargetPrefixOccurrences: numberOfFirstTwoDigitDuplicates
+            )
+
+            if score.isPerfect {
+                return grid
+            }
+            if bestScore == nil || score < bestScore! {
+                bestGrid = grid
+                bestScore = score
+            }
+            if DispatchTime.now().uptimeNanoseconds >= deadline {
+                let fallbackScore = bestScore!
+                DiagnosticLog.event(
+                    "grid",
+                    "100 ms search budget exhausted after \(candidateCount) candidates; "
+                        + "using fallback with extraFullSequences="
+                        + "\(fallbackScore.extraFullSequenceOccurrences) "
+                        + "extraTargetPrefixes=\(fallbackScore.extraTargetPrefixOccurrences)"
+                )
+                return bestGrid!
+            }
         }
     }
 
