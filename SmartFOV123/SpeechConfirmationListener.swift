@@ -4,6 +4,7 @@ import Foundation
 import Speech
 
 struct TimedSpeechSegment: Sendable {
+    let recognitionPass: UInt64
     let id: String
     let text: String
     let startUptimeNanoseconds: UInt64
@@ -144,6 +145,7 @@ final class SpeechConfirmationListener {
                     let startOffset = UInt64(max(0, segment.timestamp) * 1_000_000_000)
                     let stopOffset = UInt64(max(0, segment.timestamp + segment.duration) * 1_000_000_000)
                     return TimedSpeechSegment(
+                        recognitionPass: pass,
                         id: "\(pass)-\(index)",
                         text: segment.substring,
                         startUptimeNanoseconds: recognitionStartUptimeNanoseconds + startOffset,

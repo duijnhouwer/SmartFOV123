@@ -464,7 +464,8 @@ final class AppModel {
            plan.input.stopCommand == .speechStop,
            let stopSegment = segments.first(where: {
                $0.text.lowercased().split(whereSeparator: { !$0.isLetter }).contains("stop")
-           }) {
+           }),
+           hasUsableTiming(stopSegment) {
             stopSearchTimer(atMS: elapsedMilliseconds(atUptimeNanoseconds: stopSegment.startUptimeNanoseconds))
             speechListener.pauseForFeedback()
             scheduleSpeechRestart(afterNanoseconds: 250_000_000)
@@ -479,7 +480,8 @@ final class AppModel {
             maximumPauseSeconds: speech.maxInterdigitPauseSeconds
         )
         let candidate = String(attemptDigits.map(\.digit))
-        guard candidate.count == 3 else {
+        guard candidate.count == 3,
+              hasUsableOrderedTiming(attemptDigits) else {
             return
         }
         DiagnosticLog.event("speech", "three-digit candidate parsed; trial=\(currentTrialIndex + 1) phase=\(String(describing: trialPhase)) candidate=\(candidate)")
@@ -719,34 +721,32 @@ final class AppModel {
         aliases: [String: Int]
     ) {
         guard currentTrialMeasurement != nil else { return }
-        for segment in segments {
-            let raw = segment.text.lowercased()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let words = raw.split { !$0.isLetter && !$0.isNumber }.map(String.init)
-            let tokenText = words.count == 1 ? words[0] : raw
-            let normalized = aliases[tokenText].map(String.init) ?? tokenText
-            let tokens = normalized.allSatisfy(\.isNumber) && normalized.count > 1
-                ? normalized.map(String.init)
-                : [normalized]
-            let start = elapsedMilliseconds(atUptimeNanoseconds: segment.startUptimeNanoseconds)
-            let stop = elapsedMilliseconds(atUptimeNanoseconds: segment.stopUptimeNanoseconds)
-            let duration = stop >= start ? stop - start : 0
-            for (index, token) in tokens.enumerated() {
-                let tokenStart = start + duration * UInt64(index) / UInt64(tokens.count)
-                let tokenStop = start + duration * UInt64(index + 1) / UInt64(tokens.count)
-                let id = "\(segment.id)-\(index)"
-                let event = CompletedTrialResults.SpeechDetection(
-                    id: id,
-                    token: token,
-                    startMS: Int64(tokenStart),
-                    stopMS: Int64(tokenStop)
-                )
-                if let existing = currentTrialMeasurement?.speech.firstIndex(where: { $0.id == id }) {
-                    currentTrialMeasurement?.speech[existing] = event
-                } else {
-                    currentTrialMeasurement?.speech.append(event)
-                }
+        let recognitionPasses = Dictionary(grouping: segments, by: \.recognitionPass)
+        currentTrialMeasurement?.speech.removeAll { event in
+            recognitionPasses.keys.contains { event.id.hasPrefix("\($0)-") }
+        }
+        for (pass, passSegments) in recognitionPasses {
+            let ordered = passSegments.sorted {
+                $0.startUptimeNanoseconds < $1.startUptimeNanoseconds
             }
+            guard let first = ordered.first, let last = ordered.last else { continue }
+            let transcript = ordered.map(\.text).joined(separator: " ")
+            let token = SpokenDigitParser.normalizedForStorage(
+                transcript,
+                aliases: aliases
+            )
+            currentTrialMeasurement?.speech.append(
+                .init(
+                    id: "\(pass)-utterance",
+                    token: token,
+                    startMS: Int64(elapsedMilliseconds(
+                        atUptimeNanoseconds: first.startUptimeNanoseconds
+                    )),
+                    stopMS: Int64(elapsedMilliseconds(
+                        atUptimeNanoseconds: last.stopUptimeNanoseconds
+                    ))
+                )
+            )
         }
         currentTrialMeasurement?.speech.sort { $0.startMS < $1.startMS }
     }
@@ -755,6 +755,24 @@ final class AppModel {
         let digit: Character
         let startUptimeNanoseconds: UInt64
         let stopUptimeNanoseconds: UInt64
+    }
+
+    private func hasUsableTiming(_ segment: TimedSpeechSegment) -> Bool {
+        segment.stopUptimeNanoseconds > segment.startUptimeNanoseconds
+            && elapsedMilliseconds(atUptimeNanoseconds: segment.stopUptimeNanoseconds)
+                > elapsedMilliseconds(atUptimeNanoseconds: segment.startUptimeNanoseconds)
+    }
+
+    private func hasUsableOrderedTiming(_ digits: [TimedDigit]) -> Bool {
+        guard digits.allSatisfy({ digit in
+            digit.stopUptimeNanoseconds > digit.startUptimeNanoseconds
+                && elapsedMilliseconds(atUptimeNanoseconds: digit.stopUptimeNanoseconds)
+                    > elapsedMilliseconds(atUptimeNanoseconds: digit.startUptimeNanoseconds)
+        }) else { return false }
+
+        return zip(digits, digits.dropFirst()).allSatisfy { previous, next in
+            next.startUptimeNanoseconds > previous.startUptimeNanoseconds
+        }
     }
 
     private func currentSpeechDigitAttempt(
